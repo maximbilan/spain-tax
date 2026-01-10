@@ -41,7 +41,6 @@ A comprehensive command-line tool for calculating Spanish personal income tax (I
 
 The script will automatically:
 - Create a Python virtual environment
-- Install dependencies (if any)
 - Run the calculator
 
 ## Usage
