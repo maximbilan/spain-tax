@@ -27,10 +27,15 @@ from tax_calculator import (
     ALLOWANCE_CHILD_DISABILITY_33,
     ALLOWANCE_CHILD_DISABILITY_65,
     ALLOWANCE_ASCENDANT_65,
+    ALLOWANCE_ASCENDANT_DISABILITY_33,
+    ALLOWANCE_ASCENDANT_DISABILITY_65,
     ALLOWANCE_LARGE_FAMILY_GENERAL,
+    ALLOWANCE_LARGE_FAMILY_SPECIAL,
     ALLOWANCE_SINGLE_PARENT,
     ALLOWANCE_DISABILITY_33,
     ALLOWANCE_DISABILITY_65,
+    ALLOWANCE_DISABILITY_MOBILITY,
+    ALLOWANCE_DISABILITY_DEPENDENCY,
 )
 
 
@@ -56,6 +61,16 @@ class TestPersonalAllowanceByAge(unittest.TestCase):
     def test_none_age(self):
         """Test personal allowance when age is None."""
         self.assertEqual(get_personal_allowance_by_age(None), PERSONAL_ALLOWANCE_UNDER_65)
+
+    def test_age_boundary_64_to_65(self):
+        """Test exact boundary between age groups."""
+        self.assertEqual(get_personal_allowance_by_age(64), PERSONAL_ALLOWANCE_UNDER_65)
+        self.assertEqual(get_personal_allowance_by_age(65), PERSONAL_ALLOWANCE_65_74)
+
+    def test_age_boundary_74_to_75(self):
+        """Test exact boundary between 65-74 and 75+ groups."""
+        self.assertEqual(get_personal_allowance_by_age(74), PERSONAL_ALLOWANCE_65_74)
+        self.assertEqual(get_personal_allowance_by_age(75), PERSONAL_ALLOWANCE_75_PLUS)
 
 
 class TestDependentAllowances(unittest.TestCase):
@@ -119,16 +134,37 @@ class TestDependentAllowances(unittest.TestCase):
         dependents = DependentInfo(ascendants_65=1)
         self.assertEqual(calculate_dependent_allowances(dependents), ALLOWANCE_ASCENDANT_65)
 
+    def test_ascendant_disability_33(self):
+        """Test allowance for ascendant with 33%+ disability."""
+        dependents = DependentInfo(ascendants_disability_33=1)
+        self.assertEqual(calculate_dependent_allowances(dependents), ALLOWANCE_ASCENDANT_DISABILITY_33)
+
+    def test_ascendant_disability_65(self):
+        """Test allowance for ascendant with 65%+ disability."""
+        dependents = DependentInfo(ascendants_disability_65=1)
+        self.assertEqual(calculate_dependent_allowances(dependents), ALLOWANCE_ASCENDANT_DISABILITY_65)
+
+    def test_multiple_ascendants(self):
+        """Test allowances for multiple ascendants."""
+        dependents = DependentInfo(ascendants_65=2, ascendants_disability_33=1)
+        expected = (2 * ALLOWANCE_ASCENDANT_65 + ALLOWANCE_ASCENDANT_DISABILITY_33)
+        self.assertEqual(calculate_dependent_allowances(dependents), expected)
+
     def test_large_family(self):
         """Test allowance for large family."""
         dependents = DependentInfo(large_family=True)
         self.assertEqual(calculate_dependent_allowances(dependents), ALLOWANCE_LARGE_FAMILY_GENERAL)
 
     def test_large_family_special(self):
-        """Test allowance for special large family."""
+        """Test allowance for special large family (takes precedence over general)."""
         dependents = DependentInfo(large_family_special=True)
-        # Special takes precedence over general
-        self.assertGreater(calculate_dependent_allowances(dependents), ALLOWANCE_LARGE_FAMILY_GENERAL)
+        self.assertEqual(calculate_dependent_allowances(dependents), ALLOWANCE_LARGE_FAMILY_SPECIAL)
+
+    def test_large_family_special_precedence(self):
+        """Test that special large family takes precedence over general."""
+        dependents = DependentInfo(large_family=True, large_family_special=True)
+        # Special should take precedence
+        self.assertEqual(calculate_dependent_allowances(dependents), ALLOWANCE_LARGE_FAMILY_SPECIAL)
 
     def test_single_parent(self):
         """Test allowance for single parent."""
@@ -144,6 +180,32 @@ class TestDependentAllowances(unittest.TestCase):
         """Test allowance for taxpayer with 65%+ disability."""
         dependents = DependentInfo(taxpayer_disability_65=True)
         self.assertEqual(calculate_dependent_allowances(dependents), ALLOWANCE_DISABILITY_65)
+
+    def test_taxpayer_disability_mobility(self):
+        """Test allowance for taxpayer with mobility disability."""
+        dependents = DependentInfo(taxpayer_disability_mobility=True)
+        self.assertEqual(calculate_dependent_allowances(dependents), ALLOWANCE_DISABILITY_MOBILITY)
+
+    def test_taxpayer_disability_dependency(self):
+        """Test allowance for taxpayer requiring assistance."""
+        dependents = DependentInfo(taxpayer_disability_dependency=True)
+        self.assertEqual(calculate_dependent_allowances(dependents), ALLOWANCE_DISABILITY_DEPENDENCY)
+
+    def test_taxpayer_disability_priority(self):
+        """Test that taxpayer disability allowances follow priority (dependency > 65% > mobility > 33%)."""
+        # Dependency has highest priority
+        dependents = DependentInfo(taxpayer_disability_dependency=True, taxpayer_disability_65=True,
+                                   taxpayer_disability_mobility=True, taxpayer_disability_33=True)
+        self.assertEqual(calculate_dependent_allowances(dependents), ALLOWANCE_DISABILITY_DEPENDENCY)
+
+        # 65% has priority over mobility and 33%
+        dependents = DependentInfo(taxpayer_disability_65=True, taxpayer_disability_mobility=True,
+                                   taxpayer_disability_33=True)
+        self.assertEqual(calculate_dependent_allowances(dependents), ALLOWANCE_DISABILITY_65)
+
+        # Mobility has priority over 33%
+        dependents = DependentInfo(taxpayer_disability_mobility=True, taxpayer_disability_33=True)
+        self.assertEqual(calculate_dependent_allowances(dependents), ALLOWANCE_DISABILITY_MOBILITY)
 
     def test_complex_scenario(self):
         """Test complex scenario with multiple allowances."""
@@ -213,45 +275,94 @@ class TestBracketTaxCalculation(unittest.TestCase):
         self.assertEqual(len(breakdown), 1)
         self.assertIsNone(breakdown[0].bracket_max)
 
+    def test_exact_bracket_boundary(self):
+        """Test tax calculation at exact bracket boundaries."""
+        brackets = [
+            (0, 10000, 0.10),
+            (10000, 20000, 0.20),
+        ]
+        # At first bracket boundary
+        tax, breakdown = calculate_bracket_tax(10000, brackets)
+        self.assertAlmostEqual(tax, 1000.0, places=2)
+        self.assertEqual(len(breakdown), 1)
+        # Just above first bracket boundary
+        tax, breakdown = calculate_bracket_tax(10001, brackets)
+        expected = 10000 * 0.10 + 1 * 0.20
+        self.assertAlmostEqual(tax, expected, places=2)
+        self.assertEqual(len(breakdown), 2)
+
+    def test_state_brackets_exact_values(self):
+        """Test exact tax calculation using real state brackets."""
+        # Test income at €12,450 (first bracket boundary)
+        tax, breakdown = calculate_bracket_tax(12450, STATE_TAX_BRACKETS)
+        expected = 12450 * 0.19
+        self.assertAlmostEqual(tax, expected, places=2)
+
+        # Test income at €20,200 (second bracket boundary)
+        tax, breakdown = calculate_bracket_tax(20200, STATE_TAX_BRACKETS)
+        expected = 12450 * 0.19 + (20200 - 12450) * 0.24
+        self.assertAlmostEqual(tax, expected, places=2)
+
 
 class TestStandardTaxCalculation(unittest.TestCase):
     """Test standard tax calculation (non-Beckham Law)."""
 
-    def test_low_income_no_region(self):
-        """Test tax calculation for low income with no regional tax."""
-        result = calculate_tax(20000, region='none')
-        self.assertGreater(result.social_security_tax, 0)
-        self.assertGreater(result.irpf_tax, 0)
-        self.assertGreater(result.net_income, 0)
-        self.assertLess(result.net_income, result.gross_income)
-        self.assertEqual(result.regional_irpf_tax, 0.0)
-        self.assertFalse(result.beckham_law)
+    def test_exact_calculation_60000_no_region(self):
+        """Test exact tax calculation for €60,000 with no regional tax."""
+        result = calculate_tax(60000, region='none')
 
-    def test_income_with_personal_allowance(self):
-        """Test that personal allowance reduces taxable income."""
-        income = 30000
-        result = calculate_tax(income, region='none')
-        self.assertLess(result.taxable_income, result.income_after_ss)
+        # Verify Social Security
+        expected_ss = 60000 * SOCIAL_SECURITY_RATE
+        self.assertAlmostEqual(result.social_security_tax, expected_ss, places=2)
+
+        # Verify income after SS
+        expected_income_after_ss = 60000 - expected_ss
+        self.assertAlmostEqual(result.income_after_ss, expected_income_after_ss, places=2)
+
+        # Verify personal allowance
         self.assertEqual(result.personal_allowance, PERSONAL_ALLOWANCE_UNDER_65)
 
-    def test_income_below_allowance(self):
+        # Verify taxable income
+        expected_taxable = max(0, expected_income_after_ss - PERSONAL_ALLOWANCE_UNDER_65)
+        self.assertAlmostEqual(result.taxable_income, expected_taxable, places=2)
+
+        # Verify net income calculation
+        expected_net = result.gross_income - result.total_deductions
+        self.assertAlmostEqual(result.net_income, expected_net, places=2)
+
+        # Verify effective rate
+        expected_rate = (result.total_deductions / result.gross_income) * 100
+        self.assertAlmostEqual(result.effective_rate, expected_rate, places=2)
+
+    def test_exact_calculation_60000_madrid(self):
+        """Test exact tax calculation for €60,000 in Madrid region."""
+        result = calculate_tax(60000, region='madrid')
+
+        # Should have both state and regional tax
+        self.assertGreater(result.state_irpf_tax, 0)
+        self.assertGreater(result.regional_irpf_tax, 0)
+        self.assertEqual(result.region, 'madrid')
+
+        # Total IRPF should be sum of state and regional
+        self.assertAlmostEqual(result.irpf_tax, result.state_irpf_tax + result.regional_irpf_tax, places=2)
+
+    def test_income_below_personal_allowance(self):
         """Test tax calculation when income is below personal allowance."""
         income = 5000  # Below personal allowance
         result = calculate_tax(income, region='none')
         self.assertEqual(result.taxable_income, 0)
         self.assertEqual(result.irpf_tax, 0.0)
+        # Should still pay Social Security
+        self.assertGreater(result.social_security_tax, 0)
 
-    def test_madrid_region(self):
-        """Test tax calculation for Madrid region."""
-        result = calculate_tax(60000, region='madrid')
-        self.assertGreater(result.regional_irpf_tax, 0)
-        self.assertEqual(result.region, 'madrid')
-
-    def test_catalonia_region(self):
-        """Test tax calculation for Catalonia region."""
-        result = calculate_tax(60000, region='catalonia')
-        self.assertGreater(result.regional_irpf_tax, 0)
-        self.assertEqual(result.region, 'catalonia')
+    def test_income_exactly_at_personal_allowance(self):
+        """Test tax calculation when income exactly equals personal allowance after SS."""
+        # Income after SS should equal personal allowance
+        income_after_ss = PERSONAL_ALLOWANCE_UNDER_65
+        income = income_after_ss / (1 - SOCIAL_SECURITY_RATE)
+        result = calculate_tax(income, region='none')
+        self.assertAlmostEqual(result.taxable_income, 0, places=2)
+        self.assertAlmostEqual(result.irpf_tax, 0.0, places=2)
 
     def test_age_based_allowance(self):
         """Test tax calculation with age-based personal allowance."""
@@ -265,6 +376,7 @@ class TestStandardTaxCalculation(unittest.TestCase):
 
         # Higher allowance should result in lower tax
         self.assertLess(result_75.irpf_tax, result_young.irpf_tax)
+        self.assertLess(result_65.irpf_tax, result_young.irpf_tax)
 
     def test_custom_personal_allowance(self):
         """Test tax calculation with custom personal allowance."""
@@ -279,43 +391,68 @@ class TestStandardTaxCalculation(unittest.TestCase):
         expected_ss = 60000 * custom_rate
         self.assertAlmostEqual(result.social_security_tax, expected_ss, places=2)
 
+    def test_social_security_rate_zero(self):
+        """Test tax calculation with zero social security rate."""
+        result = calculate_tax(60000, social_security_rate=0.0, region='none')
+        self.assertEqual(result.social_security_tax, 0.0)
+        self.assertEqual(result.income_after_ss, result.gross_income)
+
     def test_with_dependents(self):
         """Test tax calculation with dependents."""
         dependents = DependentInfo(children_3_plus=2, large_family=True)
         result = calculate_tax(60000, dependents=dependents, region='none')
         self.assertGreater(result.dependent_allowances, 0)
         self.assertGreater(result.total_allowances, result.personal_allowance)
+        # Taxable income should be reduced by total allowances
+        expected_taxable = max(0, result.income_after_ss - result.total_allowances)
+        self.assertAlmostEqual(result.taxable_income, expected_taxable, places=2)
 
-    def test_effective_rate_calculation(self):
-        """Test that effective rate is calculated correctly."""
-        result = calculate_tax(60000, region='none')
-        expected_rate = (result.total_deductions / result.gross_income) * 100
-        self.assertAlmostEqual(result.effective_rate, expected_rate, places=2)
+    def test_all_regions(self):
+        """Test that all valid regions work correctly."""
+        valid_regions = ['madrid', 'catalonia', 'andalusia', 'valencia', 'basque',
+                         'galicia', 'castilla_leon', 'canary_islands', 'none']
+        for region in valid_regions:
+            result = calculate_tax(60000, region=region)
+            self.assertEqual(result.region, region)
+            if region == 'none':
+                self.assertEqual(result.regional_irpf_tax, 0.0)
+            else:
+                self.assertGreater(result.regional_irpf_tax, 0)
 
-    def test_net_income_calculation(self):
-        """Test that net income is calculated correctly."""
-        result = calculate_tax(60000, region='none')
-        expected_net = result.gross_income - result.total_deductions
-        self.assertAlmostEqual(result.net_income, expected_net, places=2)
+    def test_region_normalization(self):
+        """Test that region names are normalized to lowercase."""
+        result = calculate_tax(60000, region='MADRID')
+        self.assertEqual(result.region, 'madrid')
 
     def test_breakdown_included(self):
         """Test that tax breakdown is included in result."""
         result = calculate_tax(60000, region='madrid')
         self.assertGreater(len(result.state_breakdown), 0)
         self.assertGreater(len(result.regional_breakdown), 0)
+        # Verify breakdown sums match total tax
+        state_sum = sum(b.tax_amount for b in result.state_breakdown)
+        self.assertAlmostEqual(result.state_irpf_tax, state_sum, places=2)
+        regional_sum = sum(b.tax_amount for b in result.regional_breakdown)
+        self.assertAlmostEqual(result.regional_irpf_tax, regional_sum, places=2)
 
-    def test_high_income(self):
-        """Test tax calculation for high income."""
-        result = calculate_tax(300000, region='none')
-        self.assertGreater(result.irpf_tax, 0)
-        # Should hit highest bracket (after SS deduction, need higher income)
-        # Income after SS: 300000 * (1 - 0.0635) = 280950, which is below 300k threshold
-        # So we need income that after SS is above 300k
+    def test_high_income_highest_bracket(self):
+        """Test tax calculation for high income hitting highest bracket (47%)."""
+        # Income that after SS exceeds €300k threshold
         high_income = 350000
-        result_high = calculate_tax(high_income, region='none')
+        result = calculate_tax(high_income, region='none')
         income_after_ss = high_income * (1 - SOCIAL_SECURITY_RATE)
         if income_after_ss > 300000:
-            self.assertTrue(any(b.rate == 0.47 for b in result_high.state_breakdown))
+            # Should have breakdown entry with 47% rate
+            self.assertTrue(any(b.rate == 0.47 for b in result.state_breakdown))
+            # Verify highest bracket tax is calculated
+            highest_bracket_tax = sum(b.tax_amount for b in result.state_breakdown if b.rate == 0.47)
+            self.assertGreater(highest_bracket_tax, 0)
+
+    def test_none_dependents(self):
+        """Test that None dependents are handled correctly."""
+        result = calculate_tax(60000, dependents=None, region='none')
+        self.assertIsNotNone(result.dependents)
+        self.assertEqual(result.dependent_allowances, 0)
 
 
 class TestBeckhamLawCalculation(unittest.TestCase):
@@ -327,7 +464,8 @@ class TestBeckhamLawCalculation(unittest.TestCase):
         result = calculate_tax(income, beckham_law=True, region='none')
         self.assertTrue(result.beckham_law)
         self.assertEqual(result.regional_irpf_tax, 0.0)
-        expected_tax = income * (1 - SOCIAL_SECURITY_RATE) * BECKHAM_LAW_RATE
+        income_after_ss = income * (1 - SOCIAL_SECURITY_RATE)
+        expected_tax = income_after_ss * BECKHAM_LAW_RATE
         self.assertAlmostEqual(result.beckham_law_tax, expected_tax, places=0)
         self.assertEqual(result.beckham_law_excess_tax, 0.0)
 
@@ -340,6 +478,7 @@ class TestBeckhamLawCalculation(unittest.TestCase):
         self.assertTrue(result.beckham_law)
         expected_tax = BECKHAM_LAW_THRESHOLD * BECKHAM_LAW_RATE
         self.assertAlmostEqual(result.beckham_law_tax, expected_tax, places=0)
+        self.assertEqual(result.beckham_law_excess_tax, 0.0)
 
     def test_beckham_law_above_threshold(self):
         """Test Beckham Law for income above threshold."""
@@ -351,6 +490,8 @@ class TestBeckhamLawCalculation(unittest.TestCase):
         self.assertAlmostEqual(result.beckham_law_tax, expected_flat_tax, places=0)
         self.assertGreater(result.beckham_law_excess_tax, 0)
         self.assertGreater(len(result.state_breakdown), 0)
+        # Total IRPF should be flat tax + excess tax
+        self.assertAlmostEqual(result.irpf_tax, result.beckham_law_tax + result.beckham_law_excess_tax, places=2)
 
     def test_beckham_law_no_allowances(self):
         """Test that Beckham Law doesn't apply personal allowances."""
@@ -359,6 +500,8 @@ class TestBeckhamLawCalculation(unittest.TestCase):
         self.assertEqual(result.personal_allowance, 0)
         self.assertEqual(result.dependent_allowances, 0)
         self.assertEqual(result.total_allowances, 0)
+        # Taxable income should equal income after SS
+        self.assertAlmostEqual(result.taxable_income, result.income_after_ss, places=2)
 
     def test_beckham_law_no_regional_tax(self):
         """Test that Beckham Law doesn't apply regional tax."""
@@ -373,6 +516,8 @@ class TestBeckhamLawCalculation(unittest.TestCase):
         result_beckham = calculate_tax(income, beckham_law=True, region='none')
         result_standard = calculate_tax(income, beckham_law=False, region='none')
         self.assertNotEqual(result_beckham.irpf_tax, result_standard.irpf_tax)
+        # Beckham Law should generally result in lower tax for high earners
+        self.assertLess(result_beckham.irpf_tax, result_standard.irpf_tax)
 
 
 class TestEdgeCases(unittest.TestCase):
@@ -386,12 +531,16 @@ class TestEdgeCases(unittest.TestCase):
         self.assertEqual(result.irpf_tax, 0)
         self.assertEqual(result.net_income, 0)
         self.assertEqual(result.effective_rate, 0)
+        self.assertEqual(result.taxable_income, 0)
 
     def test_very_low_income(self):
-        """Test calculation with very low income."""
+        """Test calculation with very low income (below personal allowance)."""
         result = calculate_tax(1000, region='none')
         self.assertGreaterEqual(result.net_income, 0)
         self.assertLessEqual(result.effective_rate, 100)
+        # Should only pay Social Security, no IRPF
+        self.assertEqual(result.irpf_tax, 0.0)
+        self.assertGreater(result.social_security_tax, 0)
 
     def test_very_high_income(self):
         """Test calculation with very high income."""
@@ -400,25 +549,35 @@ class TestEdgeCases(unittest.TestCase):
         self.assertLess(result.net_income, result.gross_income)
         # Should hit highest bracket
         self.assertTrue(any(b.rate == 0.47 for b in result.state_breakdown))
+        # Net income should be positive
+        self.assertGreater(result.net_income, 0)
 
-    def test_region_normalization(self):
-        """Test that region names are normalized to lowercase."""
-        result = calculate_tax(60000, region='MADRID')
-        self.assertEqual(result.region, 'madrid')
+    def test_income_at_bracket_boundaries(self):
+        """Test calculations at exact state bracket boundaries."""
+        # Test at €12,450 boundary
+        result = calculate_tax(12450, region='none')
+        self.assertGreater(result.irpf_tax, 0)
 
-    def test_none_dependents(self):
-        """Test that None dependents are handled correctly."""
-        result = calculate_tax(60000, dependents=None, region='none')
-        self.assertIsNotNone(result.dependents)
-        self.assertEqual(result.dependent_allowances, 0)
+        # Test at €20,200 boundary
+        result = calculate_tax(20200, region='none')
+        self.assertGreater(result.irpf_tax, 0)
 
-    def test_all_regions(self):
-        """Test that all valid regions work."""
-        valid_regions = ['madrid', 'catalonia', 'andalusia', 'valencia', 'basque',
-                         'galicia', 'castilla_leon', 'canary_islands', 'none']
-        for region in valid_regions:
-            result = calculate_tax(60000, region=region)
-            self.assertEqual(result.region, region)
+        # Test at €35,200 boundary
+        result = calculate_tax(35200, region='none')
+        self.assertGreater(result.irpf_tax, 0)
+
+        # Test at €60,000 boundary
+        result = calculate_tax(60000, region='none')
+        self.assertGreater(result.irpf_tax, 0)
+
+        # Test at €300,000 boundary
+        # Need to account for SS deduction
+        income_after_ss_at_300k = 300000
+        income = income_after_ss_at_300k / (1 - SOCIAL_SECURITY_RATE)
+        result = calculate_tax(income, region='none')
+        # Should have breakdown entries with 45% and 47% rates
+        rates = [b.rate for b in result.state_breakdown]
+        self.assertTrue(0.45 in rates or 0.47 in rates)
 
 
 class TestTaxResultStructure(unittest.TestCase):
@@ -426,7 +585,7 @@ class TestTaxResultStructure(unittest.TestCase):
 
     def test_tax_result_attributes(self):
         """Test that TaxResult has all required attributes."""
-        result = calculate_tax(60000.0, region='none')  # Use float to ensure float type
+        result = calculate_tax(60000.0, region='none')
         self.assertIsInstance(result.gross_income, (int, float))
         self.assertIsInstance(result.social_security_tax, (int, float))
         self.assertIsInstance(result.income_after_ss, (int, float))
@@ -442,9 +601,28 @@ class TestTaxResultStructure(unittest.TestCase):
         self.assertIsInstance(result.effective_rate, (int, float))
         self.assertIsInstance(result.region, str)
         self.assertIsInstance(result.beckham_law, bool)
+        self.assertIsInstance(result.beckham_law_tax, (int, float))
+        self.assertIsInstance(result.beckham_law_excess_tax, (int, float))
+        self.assertIsInstance(result.taxpayer_age, (int, type(None)))
         self.assertIsInstance(result.dependents, DependentInfo)
         self.assertIsInstance(result.state_breakdown, list)
         self.assertIsInstance(result.regional_breakdown, list)
+
+    def test_tax_result_consistency(self):
+        """Test that TaxResult values are internally consistent."""
+        result = calculate_tax(60000, region='madrid')
+        # Total deductions should equal SS + IRPF
+        self.assertAlmostEqual(result.total_deductions,
+                              result.social_security_tax + result.irpf_tax, places=2)
+        # Net income should equal gross - total deductions
+        self.assertAlmostEqual(result.net_income,
+                              result.gross_income - result.total_deductions, places=2)
+        # IRPF should equal state + regional
+        self.assertAlmostEqual(result.irpf_tax,
+                              result.state_irpf_tax + result.regional_irpf_tax, places=2)
+        # Total allowances should equal personal + dependent
+        self.assertAlmostEqual(result.total_allowances,
+                              result.personal_allowance + result.dependent_allowances, places=2)
 
 
 if __name__ == '__main__':
