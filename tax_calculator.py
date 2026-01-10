@@ -624,6 +624,70 @@ def _print_monthly_breakdown(result: TaxResult):
     print()
 
 
+def print_regional_rates():
+    """Print IRPF tax rates by region in a table format."""
+    print(f"\n{Colors.BOLD}{Colors.HEADER}{'='*80}{Colors.ENDC}")
+    print(f"{Colors.BOLD}{Colors.HEADER}  Spanish IRPF Tax Rates by Region (2024){Colors.ENDC}")
+    print(f"{Colors.BOLD}{Colors.HEADER}{'='*80}{Colors.ENDC}\n")
+
+    # Table header
+    print(f"{Colors.BOLD}{Colors.UNDERLINE}{'Region':<20} {'Income Range':<25} {'State':>8} {'Regional':>10} {'Total':>8}{Colors.ENDC}")
+    print(f"{'-'*80}")
+
+    # Print state rates (same for all regions)
+    print(f"\n{Colors.BOLD}{Colors.OKCYAN}State IRPF Rates (applies to all regions):{Colors.ENDC}\n")
+    for bracket_min, bracket_max, rate in STATE_TAX_BRACKETS:
+        bracket_str = format_bracket_range(bracket_min, bracket_max)
+        print(f"  {bracket_str:<25} {format_percentage(rate):>8}")
+
+    # Print regional rates
+    print(f"\n{Colors.BOLD}{Colors.OKCYAN}Regional IRPF Rates (in addition to state rates):{Colors.ENDC}\n")
+
+    # Sort regions for consistent display
+    sorted_regions = sorted([r for r in VALID_REGIONS if r != 'none'])
+
+    for region in sorted_regions:
+        region_display = _format_region_display(region)
+        brackets = REGIONAL_TAX_BRACKETS.get(region, [])
+        if brackets:
+            print(f"{Colors.BOLD}{Colors.OKBLUE}{region_display}:{Colors.ENDC}")
+            for i, (bracket_min, bracket_max, regional_rate) in enumerate(brackets):
+                bracket_str = format_bracket_range(bracket_min, bracket_max)
+                # Match state bracket by index (they have the same structure)
+                state_rate = STATE_TAX_BRACKETS[i][2]
+                total_rate = state_rate + regional_rate
+                print(f"  {bracket_str:<25} {format_percentage(state_rate):>8} "
+                      f"{format_percentage(regional_rate):>10} {Colors.BOLD}{format_percentage(total_rate):>8}{Colors.ENDC}")
+            print()
+
+    # Summary table showing total rates by region
+    print(f"\n{Colors.BOLD}{Colors.OKCYAN}Total IRPF Rates by Region (State + Regional):{Colors.ENDC}\n")
+    print(f"{Colors.BOLD}{Colors.UNDERLINE}{'Region':<20} {'Income Range':<25} {'Total Rate':>12}{Colors.ENDC}")
+    print(f"{'-'*60}")
+
+    for region in sorted_regions:
+        region_display = _format_region_display(region)
+        brackets = REGIONAL_TAX_BRACKETS.get(region, [])
+        if brackets:
+            for i, (bracket_min, bracket_max, regional_rate) in enumerate(brackets):
+                bracket_str = format_bracket_range(bracket_min, bracket_max)
+                # Match state bracket by index (they have the same structure)
+                state_rate = STATE_TAX_BRACKETS[i][2]
+                total_rate = state_rate + regional_rate
+                print(f"  {region_display:<20} {bracket_str:<25} {Colors.BOLD}{format_percentage(total_rate):>12}{Colors.ENDC}")
+        print()
+
+    # Show "none" option
+    print(f"{Colors.BOLD}{Colors.OKCYAN}State Only (no regional tax):{Colors.ENDC}\n")
+    print(f"{Colors.BOLD}{Colors.UNDERLINE}{'Region':<20} {'Income Range':<25} {'Total Rate':>12}{Colors.ENDC}")
+    print(f"{'-'*60}")
+    for bracket_min, bracket_max, rate in STATE_TAX_BRACKETS:
+        bracket_str = format_bracket_range(bracket_min, bracket_max)
+        print(f"  {'None (State only)':<20} {bracket_str:<25} {Colors.BOLD}{format_percentage(rate):>12}{Colors.ENDC}")
+
+    print()
+
+
 def print_results(result: TaxResult, verbose: bool = False):
     """Print tax calculation results with colored output."""
     _print_header(result)
@@ -668,7 +732,9 @@ Available regions: madrid, catalonia, andalusia, valencia, basque, galicia, cast
     parser.add_argument(
         'income',
         type=float,
-        help='Annual income in euros (or monthly if --monthly is used)'
+        nargs='?',
+        default=None,
+        help='Annual income in euros (or monthly if --monthly is used). Optional if --show-regions is used.'
     )
 
     parser.add_argument(
@@ -810,7 +876,24 @@ Available regions: madrid, catalonia, andalusia, valencia, basque, galicia, cast
         help='Show detailed tax bracket breakdown'
     )
 
+    parser.add_argument(
+        '--show-regions',
+        action='store_true',
+        help='Show IRPF tax rates by region and exit'
+    )
+
     args = parser.parse_args()
+
+    # Handle --show-regions command
+    if args.show_regions:
+        print_regional_rates()
+        sys.exit(0)
+
+    # Validate that income is provided if not showing regions
+    if args.income is None:
+        print(f"{Colors.FAIL}Error: Income is required unless --show-regions is used{Colors.ENDC}", file=sys.stderr)
+        parser.print_help()
+        sys.exit(1)
 
     # Convert monthly to annual if needed
     annual_income = args.income * MONTHS_PER_YEAR if args.monthly else args.income
