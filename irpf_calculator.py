@@ -83,39 +83,39 @@ def format_bracket_range(min_val: float, max_val: float = None) -> str:
 def calculate_tax(gross_income: float, personal_allowance: float = PERSONAL_ALLOWANCE) -> TaxResult:
     """
     Calculate Spanish IRPF tax based on progressive brackets.
-    
+
     Args:
         gross_income: Annual gross income in euros
         personal_allowance: Personal allowance amount (default: 5550)
-    
+
     Returns:
         TaxResult object with complete calculation breakdown
     """
     # Calculate taxable income (after personal allowance)
     taxable_income = max(0, gross_income - personal_allowance)
-    
+
     breakdown = []
     total_tax = 0.0
     remaining_income = taxable_income
-    
+
     # Calculate tax for each bracket
     for bracket_min, bracket_max, rate in TAX_BRACKETS:
         if remaining_income <= 0:
             break
-        
+
         # Calculate how much of remaining income falls in this bracket
         bracket_upper = min(bracket_max, taxable_income)
-        
+
         if bracket_upper <= bracket_min:
             continue
-        
+
         # Income in this bracket
         income_in_bracket = min(remaining_income, bracket_upper - bracket_min)
-        
+
         if income_in_bracket > 0:
             tax_in_bracket = income_in_bracket * rate
             total_tax += tax_in_bracket
-            
+
             breakdown.append(TaxBreakdown(
                 bracket_min=bracket_min,
                 bracket_max=bracket_max if bracket_max != float('inf') else None,
@@ -123,13 +123,13 @@ def calculate_tax(gross_income: float, personal_allowance: float = PERSONAL_ALLO
                 rate=rate,
                 tax_amount=tax_in_bracket
             ))
-            
+
             remaining_income -= income_in_bracket
-    
+
     # Calculate net income and effective rate
     net_income = gross_income - total_tax
     effective_rate = (total_tax / gross_income * 100) if gross_income > 0 else 0
-    
+
     return TaxResult(
         gross_income=gross_income,
         personal_allowance=personal_allowance,
@@ -146,7 +146,7 @@ def print_results(result: TaxResult, verbose: bool = False):
     print(f"\n{Colors.BOLD}{Colors.HEADER}{'='*60}{Colors.ENDC}")
     print(f"{Colors.BOLD}{Colors.HEADER}  Spanish IRPF Tax Calculation{Colors.ENDC}")
     print(f"{Colors.BOLD}{Colors.HEADER}{'='*60}{Colors.ENDC}\n")
-    
+
     # Summary section
     print(f"{Colors.BOLD}{Colors.OKCYAN}Summary:{Colors.ENDC}")
     print(f"  {Colors.OKBLUE}Gross Income:{Colors.ENDC}        {Colors.BOLD}{format_currency(result.gross_income)}{Colors.ENDC}")
@@ -155,21 +155,21 @@ def print_results(result: TaxResult, verbose: bool = False):
     print(f"  {Colors.FAIL}Total Tax:{Colors.ENDC}            {Colors.BOLD}{Colors.FAIL}{format_currency(result.total_tax)}{Colors.ENDC}")
     print(f"  {Colors.OKGREEN}Net Income:{Colors.ENDC}          {Colors.BOLD}{Colors.OKGREEN}{format_currency(result.net_income)}{Colors.ENDC}")
     print(f"  {Colors.WARNING}Effective Tax Rate:{Colors.ENDC}  {Colors.BOLD}{format_percentage(result.effective_rate / 100)}{Colors.ENDC}\n")
-    
+
     if verbose and result.breakdown:
         print(f"{Colors.BOLD}{Colors.OKCYAN}Tax Breakdown by Bracket:{Colors.ENDC}\n")
         print(f"  {Colors.UNDERLINE}{'Bracket':<25} {'Amount':<15} {'Rate':<10} {'Tax':<15}{Colors.ENDC}")
         print(f"  {'-'*65}")
-        
+
         for i, bracket in enumerate(result.breakdown, 1):
             bracket_str = format_bracket_range(bracket.bracket_min, bracket.bracket_max)
             print(f"  {Colors.OKBLUE}{bracket_str:<25}{Colors.ENDC} "
                   f"{format_currency(bracket.taxable_amount):<15} "
                   f"{format_percentage(bracket.rate):<10} "
                   f"{Colors.FAIL}{format_currency(bracket.tax_amount)}{Colors.ENDC}")
-        
+
         print()
-    
+
     # Monthly breakdown
     print(f"{Colors.BOLD}{Colors.OKCYAN}Monthly Breakdown:{Colors.ENDC}")
     monthly_gross = result.gross_income / 12
@@ -194,45 +194,45 @@ Examples:
   %(prog)s 35000 --monthly          # Input as monthly income
         """
     )
-    
+
     parser.add_argument(
         'income',
         type=float,
         help='Annual income in euros (or monthly if --monthly is used)'
     )
-    
+
     parser.add_argument(
         '--monthly',
         action='store_true',
         help='Treat income as monthly instead of annual'
     )
-    
+
     parser.add_argument(
         '--allowance',
         type=float,
         default=PERSONAL_ALLOWANCE,
         help=f'Personal allowance amount (default: €{PERSONAL_ALLOWANCE:,.0f})'
     )
-    
+
     parser.add_argument(
         '--verbose', '-v',
         action='store_true',
         help='Show detailed tax bracket breakdown'
     )
-    
+
     args = parser.parse_args()
-    
+
     # Convert monthly to annual if needed
     if args.monthly:
         annual_income = args.income * 12
     else:
         annual_income = args.income
-    
+
     # Validate input
     if annual_income < 0:
         print(f"{Colors.FAIL}Error: Income cannot be negative{Colors.ENDC}", file=sys.stderr)
         sys.exit(1)
-    
+
     # Calculate tax
     try:
         result = calculate_tax(annual_income, args.allowance)
