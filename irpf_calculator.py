@@ -93,8 +93,39 @@ REGIONAL_TAX_BRACKETS = {
     'none': [],  # No regional tax
 }
 
-# Personal allowance (minimum personal exemption)
-PERSONAL_ALLOWANCE = 5550  # euros per year
+# Personal allowance (minimum personal exemption) - varies by age
+PERSONAL_ALLOWANCE_UNDER_65 = 5550  # Under 65 years old
+PERSONAL_ALLOWANCE_65_74 = 6700  # 65-74 years old
+PERSONAL_ALLOWANCE_75_PLUS = 8100  # 75+ years old
+PERSONAL_ALLOWANCE = PERSONAL_ALLOWANCE_UNDER_65  # Default (for backward compatibility)
+
+# Dependent allowances (2024 rates)
+# Children (descendientes)
+ALLOWANCE_FIRST_CHILD = 2400  # First child
+ALLOWANCE_SECOND_CHILD = 2700  # Second child
+ALLOWANCE_THIRD_CHILD = 4000  # Third child
+ALLOWANCE_FOURTH_PLUS_CHILD = 4500  # Fourth and subsequent children
+ALLOWANCE_CHILD_UNDER_3 = 2800  # Additional for each child under 3 years old
+ALLOWANCE_CHILD_DISABILITY_33 = 3000  # Additional for child with 33%+ disability
+ALLOWANCE_CHILD_DISABILITY_65 = 12000  # Additional for child with 65%+ disability
+
+# Ascendants (elderly parents/grandparents)
+ALLOWANCE_ASCENDANT_65 = 1150  # Per ascendant over 65
+ALLOWANCE_ASCENDANT_DISABILITY_33 = 3000  # Per ascendant with 33%+ disability
+ALLOWANCE_ASCENDANT_DISABILITY_65 = 12000  # Per ascendant with 65%+ disability
+
+# Large family (familia numerosa)
+ALLOWANCE_LARGE_FAMILY_GENERAL = 2400  # General large family
+ALLOWANCE_LARGE_FAMILY_SPECIAL = 4800  # Special large family (5+ children or 4+ with disability)
+
+# Single parent (monoparental)
+ALLOWANCE_SINGLE_PARENT = 2100  # Single parent family
+
+# Disability (for taxpayer)
+ALLOWANCE_DISABILITY_33 = 3000  # Taxpayer with 33%+ disability
+ALLOWANCE_DISABILITY_65 = 12000  # Taxpayer with 65%+ disability
+ALLOWANCE_DISABILITY_MOBILITY = 3000  # Taxpayer with mobility disability
+ALLOWANCE_DISABILITY_DEPENDENCY = 12000  # Taxpayer requiring assistance
 
 # Social Security rate (employee contribution)
 # Typical rate is 6.35% of gross salary for employees
@@ -118,12 +149,33 @@ class TaxBreakdown:
 
 
 @dataclass
+class DependentInfo:
+    """Information about dependents and allowances."""
+    children_under_3: int = 0
+    children_3_plus: int = 0
+    children_disability_33: int = 0  # Children with 33%+ disability
+    children_disability_65: int = 0  # Children with 65%+ disability
+    ascendants_65: int = 0  # Ascendants over 65
+    ascendants_disability_33: int = 0  # Ascendants with 33%+ disability
+    ascendants_disability_65: int = 0  # Ascendants with 65%+ disability
+    large_family: bool = False
+    large_family_special: bool = False
+    single_parent: bool = False
+    taxpayer_disability_33: bool = False
+    taxpayer_disability_65: bool = False
+    taxpayer_disability_mobility: bool = False
+    taxpayer_disability_dependency: bool = False
+
+
+@dataclass
 class TaxResult:
     """Complete tax calculation result."""
     gross_income: float
     social_security_tax: float
     income_after_ss: float
     personal_allowance: float
+    dependent_allowances: float  # Total allowances from dependents
+    total_allowances: float  # Personal + dependent allowances
     taxable_income: float
     state_irpf_tax: float
     regional_irpf_tax: float
@@ -135,6 +187,8 @@ class TaxResult:
     beckham_law: bool
     beckham_law_tax: float  # Tax on income up to threshold
     beckham_law_excess_tax: float  # Tax on income above threshold (if any)
+    taxpayer_age: int  # Taxpayer's age
+    dependents: DependentInfo
     state_breakdown: List[TaxBreakdown]
     regional_breakdown: List[TaxBreakdown]
 
@@ -177,6 +231,69 @@ def format_bracket_range(min_val: float, max_val: float = None) -> str:
     return f"{min_str} - {max_str}"
 
 
+def calculate_dependent_allowances(dependents: DependentInfo) -> float:
+    """Calculate total allowances from dependents and family situation."""
+    total = 0.0
+    
+    # Count total children
+    total_children = dependents.children_under_3 + dependents.children_3_plus
+    
+    # Children allowances (based on order)
+    if total_children >= 1:
+        total += ALLOWANCE_FIRST_CHILD
+        if dependents.children_under_3 >= 1:
+            total += ALLOWANCE_CHILD_UNDER_3
+    if total_children >= 2:
+        total += ALLOWANCE_SECOND_CHILD
+        if dependents.children_under_3 >= 2:
+            total += ALLOWANCE_CHILD_UNDER_3
+    if total_children >= 3:
+        total += ALLOWANCE_THIRD_CHILD
+        if dependents.children_under_3 >= 3:
+            total += ALLOWANCE_CHILD_UNDER_3
+    if total_children >= 4:
+        # Fourth and subsequent
+        for i in range(4, total_children + 1):
+            total += ALLOWANCE_FOURTH_PLUS_CHILD
+            if dependents.children_under_3 >= i:
+                total += ALLOWANCE_CHILD_UNDER_3
+    
+    # Additional allowances for children under 3 (beyond the first 3)
+    if dependents.children_under_3 > 3:
+        total += (dependents.children_under_3 - 3) * ALLOWANCE_CHILD_UNDER_3
+    
+    # Disability allowances for children
+    total += dependents.children_disability_33 * ALLOWANCE_CHILD_DISABILITY_33
+    total += dependents.children_disability_65 * ALLOWANCE_CHILD_DISABILITY_65
+    
+    # Ascendants allowances
+    total += dependents.ascendants_65 * ALLOWANCE_ASCENDANT_65
+    total += dependents.ascendants_disability_33 * ALLOWANCE_ASCENDANT_DISABILITY_33
+    total += dependents.ascendants_disability_65 * ALLOWANCE_ASCENDANT_DISABILITY_65
+    
+    # Large family
+    if dependents.large_family_special:
+        total += ALLOWANCE_LARGE_FAMILY_SPECIAL
+    elif dependents.large_family:
+        total += ALLOWANCE_LARGE_FAMILY_GENERAL
+    
+    # Single parent
+    if dependents.single_parent:
+        total += ALLOWANCE_SINGLE_PARENT
+    
+    # Taxpayer disability
+    if dependents.taxpayer_disability_dependency:
+        total += ALLOWANCE_DISABILITY_DEPENDENCY
+    elif dependents.taxpayer_disability_65:
+        total += ALLOWANCE_DISABILITY_65
+    elif dependents.taxpayer_disability_mobility:
+        total += ALLOWANCE_DISABILITY_MOBILITY
+    elif dependents.taxpayer_disability_33:
+        total += ALLOWANCE_DISABILITY_33
+    
+    return total
+
+
 def calculate_bracket_tax(taxable_income: float, brackets: List[Tuple[float, float, float]]) -> Tuple[float, List[TaxBreakdown]]:
     """Calculate tax for given brackets and return tax amount and breakdown."""
     breakdown = []
@@ -211,35 +328,63 @@ def calculate_bracket_tax(taxable_income: float, brackets: List[Tuple[float, flo
     return total_tax, breakdown
 
 
-def calculate_tax(gross_income: float, personal_allowance: float = PERSONAL_ALLOWANCE, social_security_rate: float = SOCIAL_SECURITY_RATE, region: str = 'none', beckham_law: bool = False) -> TaxResult:
+def get_personal_allowance_by_age(age: int = None) -> float:
+    """Get personal allowance based on taxpayer age."""
+    if age is None:
+        return PERSONAL_ALLOWANCE_UNDER_65
+    if age >= 75:
+        return PERSONAL_ALLOWANCE_75_PLUS
+    elif age >= 65:
+        return PERSONAL_ALLOWANCE_65_74
+    else:
+        return PERSONAL_ALLOWANCE_UNDER_65
+
+
+def calculate_tax(gross_income: float, personal_allowance: float = None, social_security_rate: float = SOCIAL_SECURITY_RATE, region: str = 'none', beckham_law: bool = False, dependents: DependentInfo = None, taxpayer_age: int = None) -> TaxResult:
     """
     Calculate Spanish IRPF tax (state + regional) and social security contributions based on progressive brackets.
 
     Args:
         gross_income: Annual gross income in euros
-        personal_allowance: Personal allowance amount (default: 5550)
+        personal_allowance: Personal allowance amount (if None, calculated from age)
         social_security_rate: Social security rate (default: 0.0635 = 6.35%)
         region: Spanish region (default: 'none'). Options: madrid, catalonia, andalusia, valencia, basque, galicia, castilla_leon, canary_islands, none
         beckham_law: Whether to apply Beckham Law (24% flat rate up to €600k) (default: False)
+        dependents: DependentInfo object with information about dependents and family situation
+        taxpayer_age: Taxpayer's age in years (affects personal allowance)
 
     Returns:
         TaxResult object with complete calculation breakdown
     """
     # Normalize region name
     region = region.lower()
+    
+    # Initialize dependents if not provided
+    if dependents is None:
+        dependents = DependentInfo()
+
+    # Determine personal allowance (use age-based if age provided, otherwise use provided value or default)
+    if personal_allowance is None:
+        personal_allowance = get_personal_allowance_by_age(taxpayer_age)
 
     # Step 1: Calculate Social Security (deducted from gross income)
     social_security_tax = gross_income * social_security_rate
     income_after_ss = gross_income - social_security_tax
 
-    # Step 2: Calculate taxable income for IRPF
+    # Step 2: Calculate allowances
+    dependent_allowances = calculate_dependent_allowances(dependents)
+    total_allowances = personal_allowance + dependent_allowances
+
+    # Step 3: Calculate taxable income for IRPF
     # Note: Under Beckham Law, personal allowance typically doesn't apply
     if beckham_law:
-        taxable_income = income_after_ss  # No personal allowance under Beckham Law
+        taxable_income = income_after_ss  # No allowances under Beckham Law
+        total_allowances = 0
+        dependent_allowances = 0
     else:
-        taxable_income = max(0, income_after_ss - personal_allowance)
+        taxable_income = max(0, income_after_ss - total_allowances)
 
-    # Step 3: Calculate IRPF tax
+    # Step 4: Calculate IRPF tax
     if beckham_law:
         # Beckham Law: 24% flat rate on income up to €600,000
         # Income above €600,000 is taxed at normal progressive rates
@@ -272,7 +417,7 @@ def calculate_tax(gross_income: float, personal_allowance: float = PERSONAL_ALLO
         regional_irpf_tax, regional_breakdown = calculate_bracket_tax(taxable_income, regional_brackets)
         irpf_tax = state_irpf_tax + regional_irpf_tax
 
-    # Step 4: Calculate total deductions and net income
+    # Step 5: Calculate total deductions and net income
     total_deductions = social_security_tax + irpf_tax
     net_income = gross_income - total_deductions
     effective_rate = (total_deductions / gross_income * 100) if gross_income > 0 else 0
@@ -282,6 +427,8 @@ def calculate_tax(gross_income: float, personal_allowance: float = PERSONAL_ALLO
         social_security_tax=social_security_tax,
         income_after_ss=income_after_ss,
         personal_allowance=personal_allowance if not beckham_law else 0,
+        dependent_allowances=dependent_allowances if not beckham_law else 0,
+        total_allowances=total_allowances if not beckham_law else 0,
         taxable_income=taxable_income,
         state_irpf_tax=state_irpf_tax,
         regional_irpf_tax=regional_irpf_tax,
@@ -293,6 +440,8 @@ def calculate_tax(gross_income: float, personal_allowance: float = PERSONAL_ALLO
         beckham_law=beckham_law,
         beckham_law_tax=beckham_law_tax,
         beckham_law_excess_tax=beckham_law_excess_tax,
+        taxpayer_age=taxpayer_age,
+        dependents=dependents,
         state_breakdown=state_breakdown,
         regional_breakdown=regional_breakdown
     )
@@ -319,7 +468,17 @@ def print_results(result: TaxResult, verbose: bool = False):
     print(f"  {Colors.FAIL}{'Social Security:':<{label_width}}{Colors.ENDC} {Colors.FAIL}{format_currency_aligned(result.social_security_tax, value_width)}{Colors.ENDC}")
     print(f"  {Colors.OKBLUE}{'Income after SS:':<{label_width}}{Colors.ENDC} {format_currency_aligned(result.income_after_ss, value_width)}")
     if not result.beckham_law:
-        print(f"  {Colors.OKBLUE}{'Personal Allowance:':<{label_width}}{Colors.ENDC} {format_currency_aligned(result.personal_allowance, value_width)}")
+        # Show age-adjusted personal allowance if age was provided
+        allowance_label = 'Personal Allowance:'
+        if result.taxpayer_age is not None:
+            if result.taxpayer_age >= 75:
+                allowance_label = 'Personal Allowance (75+):'
+            elif result.taxpayer_age >= 65:
+                allowance_label = 'Personal Allowance (65-74):'
+        print(f"  {Colors.OKBLUE}{allowance_label:<{label_width}}{Colors.ENDC} {format_currency_aligned(result.personal_allowance, value_width)}")
+        if result.dependent_allowances > 0:
+            print(f"  {Colors.OKBLUE}{'Dependent Allowances:':<{label_width}}{Colors.ENDC} {format_currency_aligned(result.dependent_allowances, value_width)}")
+            print(f"  {Colors.OKBLUE}{'Total Allowances:':<{label_width}}{Colors.ENDC} {format_currency_aligned(result.total_allowances, value_width)}")
     print(f"  {Colors.OKBLUE}{'Taxable Income (IRPF):':<{label_width}}{Colors.ENDC} {format_currency_aligned(result.taxable_income, value_width)}")
     if result.beckham_law:
         if result.beckham_law_excess_tax > 0:
@@ -449,6 +608,16 @@ Examples:
   %(prog)s 60000 --region madrid    # Calculate for Madrid region
   %(prog)s 60000 --region catalonia # Calculate for Catalonia region
   %(prog)s 100000 --beckham-law     # Apply Beckham Law (24%% flat rate)
+  
+  # Dependents examples:
+  %(prog)s 60000 --children-under-3 1 --children-3-plus 2
+  %(prog)s 60000 --children-disability-65 1 --ascendants-65 2
+  %(prog)s 60000 --large-family --single-parent
+  %(prog)s 60000 --taxpayer-disability-65
+  
+  # Age examples:
+  %(prog)s 60000 --age 68              # Age 68 (higher personal allowance)
+  %(prog)s 60000 --age 75              # Age 75+ (highest personal allowance)
 
 Available regions: madrid, catalonia, andalusia, valencia, basque, galicia, castilla_leon, canary_islands, none
         """
@@ -467,10 +636,17 @@ Available regions: madrid, catalonia, andalusia, valencia, basque, galicia, cast
     )
 
     parser.add_argument(
+        '--age',
+        type=int,
+        default=None,
+        help='Taxpayer age in years (affects personal allowance: <65=€5,550, 65-74=€6,700, 75+=€8,100)'
+    )
+
+    parser.add_argument(
         '--allowance',
         type=float,
-        default=PERSONAL_ALLOWANCE,
-        help=f'Personal allowance amount (default: €{PERSONAL_ALLOWANCE:,.0f})'
+        default=None,
+        help=f'Personal allowance amount (overrides age-based calculation if provided). Default: €{PERSONAL_ALLOWANCE:,.0f} or age-based'
     )
 
     parser.add_argument(
@@ -492,6 +668,98 @@ Available regions: madrid, catalonia, andalusia, valencia, basque, galicia, cast
         '--beckham-law',
         action='store_true',
         help='Apply Beckham Law (24%% flat rate on income up to €600,000). Income above €600k taxed at normal progressive rates. Regional tax does not apply.'
+    )
+
+    # Dependent options
+    parser.add_argument(
+        '--children-under-3',
+        type=int,
+        default=0,
+        help='Number of children under 3 years old'
+    )
+
+    parser.add_argument(
+        '--children-3-plus',
+        type=int,
+        default=0,
+        help='Number of children 3 years old or older'
+    )
+
+    parser.add_argument(
+        '--children-disability-33',
+        type=int,
+        default=0,
+        help='Number of children with 33%% or more disability'
+    )
+
+    parser.add_argument(
+        '--children-disability-65',
+        type=int,
+        default=0,
+        help='Number of children with 65%% or more disability'
+    )
+
+    parser.add_argument(
+        '--ascendants-65',
+        type=int,
+        default=0,
+        help='Number of ascendants (parents/grandparents) over 65 years old'
+    )
+
+    parser.add_argument(
+        '--ascendants-disability-33',
+        type=int,
+        default=0,
+        help='Number of ascendants with 33%% or more disability'
+    )
+
+    parser.add_argument(
+        '--ascendants-disability-65',
+        type=int,
+        default=0,
+        help='Number of ascendants with 65%% or more disability'
+    )
+
+    parser.add_argument(
+        '--large-family',
+        action='store_true',
+        help='Large family status (general)'
+    )
+
+    parser.add_argument(
+        '--large-family-special',
+        action='store_true',
+        help='Special large family status (5+ children or 4+ with disability)'
+    )
+
+    parser.add_argument(
+        '--single-parent',
+        action='store_true',
+        help='Single parent family status'
+    )
+
+    parser.add_argument(
+        '--taxpayer-disability-33',
+        action='store_true',
+        help='Taxpayer has 33%% or more disability'
+    )
+
+    parser.add_argument(
+        '--taxpayer-disability-65',
+        action='store_true',
+        help='Taxpayer has 65%% or more disability'
+    )
+
+    parser.add_argument(
+        '--taxpayer-disability-mobility',
+        action='store_true',
+        help='Taxpayer has mobility disability'
+    )
+
+    parser.add_argument(
+        '--taxpayer-disability-dependency',
+        action='store_true',
+        help='Taxpayer requires assistance due to dependency'
     )
 
     parser.add_argument(
@@ -517,9 +785,31 @@ Available regions: madrid, catalonia, andalusia, valencia, basque, galicia, cast
         print(f"{Colors.FAIL}Error: Social security rate must be between 0 and 1{Colors.ENDC}", file=sys.stderr)
         sys.exit(1)
 
+    if args.age is not None and (args.age < 0 or args.age > 120):
+        print(f"{Colors.FAIL}Error: Age must be between 0 and 120{Colors.ENDC}", file=sys.stderr)
+        sys.exit(1)
+
+    # Build dependents info
+    dependents = DependentInfo(
+        children_under_3=args.children_under_3,
+        children_3_plus=args.children_3_plus,
+        children_disability_33=args.children_disability_33,
+        children_disability_65=args.children_disability_65,
+        ascendants_65=args.ascendants_65,
+        ascendants_disability_33=args.ascendants_disability_33,
+        ascendants_disability_65=args.ascendants_disability_65,
+        large_family=args.large_family,
+        large_family_special=args.large_family_special,
+        single_parent=args.single_parent,
+        taxpayer_disability_33=args.taxpayer_disability_33,
+        taxpayer_disability_65=args.taxpayer_disability_65,
+        taxpayer_disability_mobility=args.taxpayer_disability_mobility,
+        taxpayer_disability_dependency=args.taxpayer_disability_dependency
+    )
+
     # Calculate tax
     try:
-        result = calculate_tax(annual_income, args.allowance, args.ss_rate, args.region, args.beckham_law)
+        result = calculate_tax(annual_income, args.allowance, args.ss_rate, args.region, args.beckham_law, dependents, args.age)
         print_results(result, args.verbose)
     except Exception as e:
         print(f"{Colors.FAIL}Error calculating tax: {e}{Colors.ENDC}", file=sys.stderr)
