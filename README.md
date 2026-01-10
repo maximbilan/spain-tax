@@ -68,13 +68,16 @@ python3 tax_calculator.py 60000
 
 # Beckham Law (24% flat rate)
 ./run.sh 100000 --beckham-law
+
+# Show IRPF rates by region
+python3 tax_calculator.py --show-regions
 ```
 
 ## Command Line Options
 
 ### Income Options
 
-- `income` (required): Annual income in euros (or monthly if `--monthly` is used)
+- `income` (required unless `--show-regions` is used): Annual income in euros (or monthly if `--monthly` is used)
 - `--monthly`: Treat income as monthly instead of annual
 
 ### Tax Calculation Options
@@ -154,6 +157,11 @@ python3 tax_calculator.py 60000
 ### Output Options
 
 - `--verbose` or `-v`: Show detailed tax bracket breakdown
+- `--show-regions`: Display IRPF tax rates by region and exit (income argument not required)
+  - Shows state IRPF rates (applies to all regions)
+  - Shows regional IRPF rates for each region
+  - Displays total rates (State + Regional) for easy comparison
+  - Useful for comparing tax rates across different Spanish regions
 
 ## How It Works
 
@@ -271,6 +279,11 @@ The calculator provides:
    - All amounts converted to monthly figures
    - Useful for budgeting
 
+4. **Regional Rates Comparison** (with `--show-regions`)
+   - Complete breakdown of IRPF rates by region
+   - Shows state rates, regional rates, and total combined rates
+   - Helps compare tax rates across different Spanish regions
+
 ## Important Notes
 
 ### Social Security
@@ -289,6 +302,7 @@ The calculator provides:
 - Total IRPF = State + Regional
 - Some regions (like Madrid) have lower rates
 - Canary Islands has the lowest regional rates
+- Use `--show-regions` to view all regional tax rates at a glance
 
 ### Beckham Law
 - Only applies to eligible foreign workers
