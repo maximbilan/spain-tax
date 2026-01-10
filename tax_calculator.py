@@ -549,7 +549,7 @@ def _print_summary(result: TaxResult):
 def _print_bracket_table(breakdown: List[TaxBreakdown], title: str):
     """Print a bracket breakdown table."""
     print(f"{Colors.BOLD}{Colors.OKCYAN}{title}:{Colors.ENDC}\n")
-    print(f"  {Colors.UNDERLINE}{'Bracket':<25} {'Amount':<15} {'Rate':<10} {'Tax':<15}{Colors.ENDC}")
+    print(f"  {Colors.UNDERLINE}{'Bracket':<25} {'Amount':>15} {'Rate':>10} {'Tax':>15}{Colors.ENDC}")
     print(f"  {'-'*TABLE_WIDTH}")
     for bracket in breakdown:
         bracket_str = format_bracket_range(bracket.bracket_min, bracket.bracket_max)
@@ -563,7 +563,7 @@ def _print_bracket_table(breakdown: List[TaxBreakdown], title: str):
 def _print_beckham_law_breakdown(result: TaxResult):
     """Print Beckham Law tax breakdown."""
     print(f"{Colors.BOLD}{Colors.OKCYAN}Beckham Law Tax Breakdown:{Colors.ENDC}\n")
-    print(f"  {Colors.UNDERLINE}{'Income Range':<25} {'Amount':<15} {'Rate':<10} {'Tax':<15}{Colors.ENDC}")
+    print(f"  {Colors.UNDERLINE}{'Income Range':<25} {'Amount':>15} {'Rate':>10} {'Tax':>15}{Colors.ENDC}")
     print(f"  {'-'*TABLE_WIDTH}")
 
     if result.beckham_law_excess_tax > 0:
