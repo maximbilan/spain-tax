@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Spanish Tax Calculator - Setup and Run Script
-# This script creates a virtual environment, installs dependencies, and runs the calculator
+# This script creates a virtual environment and runs the calculator
 
 set -e  # Exit on error
 
@@ -43,17 +43,6 @@ fi
 # Activate virtual environment
 echo -e "${YELLOW}Activating virtual environment...${NC}"
 source "$VENV_DIR/bin/activate"
-
-# Upgrade pip
-echo -e "${YELLOW}Upgrading pip...${NC}"
-pip install --quiet --upgrade pip
-
-# Install dependencies (if any)
-if [ -f "$SCRIPT_DIR/requirements.txt" ]; then
-    echo -e "${YELLOW}Installing dependencies...${NC}"
-    pip install --quiet -r "$SCRIPT_DIR/requirements.txt"
-    echo -e "${GREEN}Dependencies installed${NC}"
-fi
 
 echo ""
 echo -e "${GREEN}Setup complete!${NC}"
