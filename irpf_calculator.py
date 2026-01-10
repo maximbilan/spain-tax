@@ -234,10 +234,10 @@ def format_bracket_range(min_val: float, max_val: float = None) -> str:
 def calculate_dependent_allowances(dependents: DependentInfo) -> float:
     """Calculate total allowances from dependents and family situation."""
     total = 0.0
-    
+
     # Count total children
     total_children = dependents.children_under_3 + dependents.children_3_plus
-    
+
     # Children allowances (based on order)
     if total_children >= 1:
         total += ALLOWANCE_FIRST_CHILD
@@ -257,30 +257,30 @@ def calculate_dependent_allowances(dependents: DependentInfo) -> float:
             total += ALLOWANCE_FOURTH_PLUS_CHILD
             if dependents.children_under_3 >= i:
                 total += ALLOWANCE_CHILD_UNDER_3
-    
+
     # Additional allowances for children under 3 (beyond the first 3)
     if dependents.children_under_3 > 3:
         total += (dependents.children_under_3 - 3) * ALLOWANCE_CHILD_UNDER_3
-    
+
     # Disability allowances for children
     total += dependents.children_disability_33 * ALLOWANCE_CHILD_DISABILITY_33
     total += dependents.children_disability_65 * ALLOWANCE_CHILD_DISABILITY_65
-    
+
     # Ascendants allowances
     total += dependents.ascendants_65 * ALLOWANCE_ASCENDANT_65
     total += dependents.ascendants_disability_33 * ALLOWANCE_ASCENDANT_DISABILITY_33
     total += dependents.ascendants_disability_65 * ALLOWANCE_ASCENDANT_DISABILITY_65
-    
+
     # Large family
     if dependents.large_family_special:
         total += ALLOWANCE_LARGE_FAMILY_SPECIAL
     elif dependents.large_family:
         total += ALLOWANCE_LARGE_FAMILY_GENERAL
-    
+
     # Single parent
     if dependents.single_parent:
         total += ALLOWANCE_SINGLE_PARENT
-    
+
     # Taxpayer disability
     if dependents.taxpayer_disability_dependency:
         total += ALLOWANCE_DISABILITY_DEPENDENCY
@@ -290,7 +290,7 @@ def calculate_dependent_allowances(dependents: DependentInfo) -> float:
         total += ALLOWANCE_DISABILITY_MOBILITY
     elif dependents.taxpayer_disability_33:
         total += ALLOWANCE_DISABILITY_33
-    
+
     return total
 
 
@@ -358,7 +358,7 @@ def calculate_tax(gross_income: float, personal_allowance: float = None, social_
     """
     # Normalize region name
     region = region.lower()
-    
+
     # Initialize dependents if not provided
     if dependents is None:
         dependents = DependentInfo()
@@ -573,7 +573,7 @@ def print_results(result: TaxResult, verbose: bool = False):
     # Monthly breakdown
     monthly_label_width = 20
     monthly_value_width = 20
-    
+
     print(f"{Colors.BOLD}{Colors.OKCYAN}Monthly Breakdown:{Colors.ENDC}")
     monthly_gross = result.gross_income / 12
     monthly_ss = result.social_security_tax / 12
@@ -608,13 +608,13 @@ Examples:
   %(prog)s 60000 --region madrid    # Calculate for Madrid region
   %(prog)s 60000 --region catalonia # Calculate for Catalonia region
   %(prog)s 100000 --beckham-law     # Apply Beckham Law (24%% flat rate)
-  
+
   # Dependents examples:
   %(prog)s 60000 --children-under-3 1 --children-3-plus 2
   %(prog)s 60000 --children-disability-65 1 --ascendants-65 2
   %(prog)s 60000 --large-family --single-parent
   %(prog)s 60000 --taxpayer-disability-65
-  
+
   # Age examples:
   %(prog)s 60000 --age 68              # Age 68 (higher personal allowance)
   %(prog)s 60000 --age 75              # Age 75+ (highest personal allowance)
