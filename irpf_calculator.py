@@ -100,6 +100,12 @@ PERSONAL_ALLOWANCE = 5550  # euros per year
 # Typical rate is 6.35% of gross salary for employees
 SOCIAL_SECURITY_RATE = 0.0635  # 6.35%
 
+# Beckham Law (Special Tax Regime for Foreign Workers)
+# Flat 24% tax rate on income up to €600,000
+# Income above €600,000 is taxed at normal progressive rates
+BECKHAM_LAW_THRESHOLD = 600000  # euros
+BECKHAM_LAW_RATE = 0.24  # 24%
+
 
 @dataclass
 class TaxBreakdown:
@@ -126,6 +132,9 @@ class TaxResult:
     net_income: float
     effective_rate: float
     region: str
+    beckham_law: bool
+    beckham_law_tax: float  # Tax on income up to threshold
+    beckham_law_excess_tax: float  # Tax on income above threshold (if any)
     state_breakdown: List[TaxBreakdown]
     regional_breakdown: List[TaxBreakdown]
 
@@ -202,7 +211,7 @@ def calculate_bracket_tax(taxable_income: float, brackets: List[Tuple[float, flo
     return total_tax, breakdown
 
 
-def calculate_tax(gross_income: float, personal_allowance: float = PERSONAL_ALLOWANCE, social_security_rate: float = SOCIAL_SECURITY_RATE, region: str = 'none') -> TaxResult:
+def calculate_tax(gross_income: float, personal_allowance: float = PERSONAL_ALLOWANCE, social_security_rate: float = SOCIAL_SECURITY_RATE, region: str = 'none', beckham_law: bool = False) -> TaxResult:
     """
     Calculate Spanish IRPF tax (state + regional) and social security contributions based on progressive brackets.
 
@@ -211,6 +220,7 @@ def calculate_tax(gross_income: float, personal_allowance: float = PERSONAL_ALLO
         personal_allowance: Personal allowance amount (default: 5550)
         social_security_rate: Social security rate (default: 0.0635 = 6.35%)
         region: Spanish region (default: 'none'). Options: madrid, catalonia, andalusia, valencia, basque, galicia, castilla_leon, canary_islands, none
+        beckham_law: Whether to apply Beckham Law (24% flat rate up to €600k) (default: False)
 
     Returns:
         TaxResult object with complete calculation breakdown
@@ -222,20 +232,47 @@ def calculate_tax(gross_income: float, personal_allowance: float = PERSONAL_ALLO
     social_security_tax = gross_income * social_security_rate
     income_after_ss = gross_income - social_security_tax
 
-    # Step 2: Calculate taxable income for IRPF (after social security and personal allowance)
-    taxable_income = max(0, income_after_ss - personal_allowance)
+    # Step 2: Calculate taxable income for IRPF
+    # Note: Under Beckham Law, personal allowance typically doesn't apply
+    if beckham_law:
+        taxable_income = income_after_ss  # No personal allowance under Beckham Law
+    else:
+        taxable_income = max(0, income_after_ss - personal_allowance)
 
-    # Step 3: Calculate State IRPF tax
-    state_irpf_tax, state_breakdown = calculate_bracket_tax(taxable_income, STATE_TAX_BRACKETS)
+    # Step 3: Calculate IRPF tax
+    if beckham_law:
+        # Beckham Law: 24% flat rate on income up to €600,000
+        # Income above €600,000 is taxed at normal progressive rates
+        beckham_law_tax = 0.0
+        beckham_law_excess_tax = 0.0
+        state_irpf_tax = 0.0
+        regional_irpf_tax = 0.0
+        state_breakdown = []
+        regional_breakdown = []
 
-    # Step 4: Calculate Regional IRPF tax
-    regional_brackets = REGIONAL_TAX_BRACKETS.get(region, REGIONAL_TAX_BRACKETS['none'])
-    regional_irpf_tax, regional_breakdown = calculate_bracket_tax(taxable_income, regional_brackets)
+        if taxable_income <= BECKHAM_LAW_THRESHOLD:
+            # All income taxed at 24%
+            beckham_law_tax = taxable_income * BECKHAM_LAW_RATE
+            state_irpf_tax = beckham_law_tax
+            irpf_tax = beckham_law_tax
+        else:
+            # Income up to threshold: 24%
+            beckham_law_tax = BECKHAM_LAW_THRESHOLD * BECKHAM_LAW_RATE
+            # Income above threshold: normal progressive rates
+            excess_income = taxable_income - BECKHAM_LAW_THRESHOLD
+            beckham_law_excess_tax, state_breakdown = calculate_bracket_tax(excess_income, STATE_TAX_BRACKETS)
+            state_irpf_tax = beckham_law_tax + beckham_law_excess_tax
+            irpf_tax = state_irpf_tax
+    else:
+        # Normal calculation: State + Regional IRPF
+        beckham_law_tax = 0.0
+        beckham_law_excess_tax = 0.0
+        state_irpf_tax, state_breakdown = calculate_bracket_tax(taxable_income, STATE_TAX_BRACKETS)
+        regional_brackets = REGIONAL_TAX_BRACKETS.get(region, REGIONAL_TAX_BRACKETS['none'])
+        regional_irpf_tax, regional_breakdown = calculate_bracket_tax(taxable_income, regional_brackets)
+        irpf_tax = state_irpf_tax + regional_irpf_tax
 
-    # Step 5: Calculate total IRPF (state + regional)
-    irpf_tax = state_irpf_tax + regional_irpf_tax
-
-    # Step 6: Calculate total deductions and net income
+    # Step 4: Calculate total deductions and net income
     total_deductions = social_security_tax + irpf_tax
     net_income = gross_income - total_deductions
     effective_rate = (total_deductions / gross_income * 100) if gross_income > 0 else 0
@@ -244,7 +281,7 @@ def calculate_tax(gross_income: float, personal_allowance: float = PERSONAL_ALLO
         gross_income=gross_income,
         social_security_tax=social_security_tax,
         income_after_ss=income_after_ss,
-        personal_allowance=personal_allowance,
+        personal_allowance=personal_allowance if not beckham_law else 0,
         taxable_income=taxable_income,
         state_irpf_tax=state_irpf_tax,
         regional_irpf_tax=regional_irpf_tax,
@@ -253,6 +290,9 @@ def calculate_tax(gross_income: float, personal_allowance: float = PERSONAL_ALLO
         net_income=net_income,
         effective_rate=effective_rate,
         region=region,
+        beckham_law=beckham_law,
+        beckham_law_tax=beckham_law_tax,
+        beckham_law_excess_tax=beckham_law_excess_tax,
         state_breakdown=state_breakdown,
         regional_breakdown=regional_breakdown
     )
@@ -261,61 +301,115 @@ def calculate_tax(gross_income: float, personal_allowance: float = PERSONAL_ALLO
 def print_results(result: TaxResult, verbose: bool = False):
     """Print tax calculation results with colored output."""
     region_display = result.region.replace('_', ' ').title() if result.region != 'none' else 'None (State only)'
+    regime_display = "Beckham Law (24% flat rate)" if result.beckham_law else "Standard IRPF"
     print(f"\n{Colors.BOLD}{Colors.HEADER}{'='*60}{Colors.ENDC}")
     print(f"{Colors.BOLD}{Colors.HEADER}  Spanish Tax Calculation (IRPF + Social Security){Colors.ENDC}")
-    print(f"{Colors.BOLD}{Colors.HEADER}  Region: {region_display}{Colors.ENDC}")
+    if result.beckham_law:
+        print(f"{Colors.BOLD}{Colors.HEADER}  Tax Regime: {regime_display}{Colors.ENDC}")
+    else:
+        print(f"{Colors.BOLD}{Colors.HEADER}  Region: {region_display}{Colors.ENDC}")
     print(f"{Colors.BOLD}{Colors.HEADER}{'='*60}{Colors.ENDC}\n")
 
     # Summary section - align all numbers to the same column
     label_width = 25  # Width for labels
     value_width = 20  # Width for values (right-aligned)
-    
+
     print(f"{Colors.BOLD}{Colors.OKCYAN}Summary:{Colors.ENDC}")
     print(f"  {Colors.OKBLUE}{'Gross Income:':<{label_width}}{Colors.ENDC} {Colors.BOLD}{format_currency_aligned(result.gross_income, value_width)}{Colors.ENDC}")
     print(f"  {Colors.FAIL}{'Social Security:':<{label_width}}{Colors.ENDC} {Colors.FAIL}{format_currency_aligned(result.social_security_tax, value_width)}{Colors.ENDC}")
     print(f"  {Colors.OKBLUE}{'Income after SS:':<{label_width}}{Colors.ENDC} {format_currency_aligned(result.income_after_ss, value_width)}")
-    print(f"  {Colors.OKBLUE}{'Personal Allowance:':<{label_width}}{Colors.ENDC} {format_currency_aligned(result.personal_allowance, value_width)}")
+    if not result.beckham_law:
+        print(f"  {Colors.OKBLUE}{'Personal Allowance:':<{label_width}}{Colors.ENDC} {format_currency_aligned(result.personal_allowance, value_width)}")
     print(f"  {Colors.OKBLUE}{'Taxable Income (IRPF):':<{label_width}}{Colors.ENDC} {format_currency_aligned(result.taxable_income, value_width)}")
-    print(f"  {Colors.FAIL}{'State IRPF Tax:':<{label_width}}{Colors.ENDC} {Colors.FAIL}{format_currency_aligned(result.state_irpf_tax, value_width)}{Colors.ENDC}")
-    if result.regional_irpf_tax > 0:
-        print(f"  {Colors.FAIL}{'Regional IRPF Tax:':<{label_width}}{Colors.ENDC} {Colors.FAIL}{format_currency_aligned(result.regional_irpf_tax, value_width)}{Colors.ENDC}")
+    if result.beckham_law:
+        if result.beckham_law_excess_tax > 0:
+            print(f"  {Colors.FAIL}{'Beckham Law Tax (24%):':<{label_width}}{Colors.ENDC} {Colors.FAIL}{format_currency_aligned(result.beckham_law_tax, value_width)}{Colors.ENDC}")
+            print(f"  {Colors.FAIL}{'Excess Tax (>€600k):':<{label_width}}{Colors.ENDC} {Colors.FAIL}{format_currency_aligned(result.beckham_law_excess_tax, value_width)}{Colors.ENDC}")
+        else:
+            print(f"  {Colors.FAIL}{'Beckham Law Tax (24%):':<{label_width}}{Colors.ENDC} {Colors.FAIL}{format_currency_aligned(result.beckham_law_tax, value_width)}{Colors.ENDC}")
+    else:
+        print(f"  {Colors.FAIL}{'State IRPF Tax:':<{label_width}}{Colors.ENDC} {Colors.FAIL}{format_currency_aligned(result.state_irpf_tax, value_width)}{Colors.ENDC}")
+        if result.regional_irpf_tax > 0:
+            print(f"  {Colors.FAIL}{'Regional IRPF Tax:':<{label_width}}{Colors.ENDC} {Colors.FAIL}{format_currency_aligned(result.regional_irpf_tax, value_width)}{Colors.ENDC}")
     print(f"  {Colors.FAIL}{'Total IRPF Tax:':<{label_width}}{Colors.ENDC} {Colors.FAIL}{format_currency_aligned(result.irpf_tax, value_width)}{Colors.ENDC}")
     print(f"  {Colors.FAIL}{'Total Deductions:':<{label_width}}{Colors.ENDC} {Colors.BOLD}{Colors.FAIL}{format_currency_aligned(result.total_deductions, value_width)}{Colors.ENDC}")
     print(f"  {Colors.OKGREEN}{'Net Income:':<{label_width}}{Colors.ENDC} {Colors.BOLD}{Colors.OKGREEN}{format_currency_aligned(result.net_income, value_width)}{Colors.ENDC}")
     print(f"  {Colors.WARNING}{'Effective Tax Rate:':<{label_width}}{Colors.ENDC} {Colors.BOLD}{format_percentage(result.effective_rate / 100):>{value_width}}{Colors.ENDC}\n")
 
     if verbose:
-        if result.state_breakdown:
-            # Calculate exact table width: 25 + 1 + 15 + 1 + 10 + 1 + 15 = 68 (excluding the 2-space indent)
+        if result.beckham_law:
+            # Beckham Law breakdown
             table_width = 25 + 1 + 15 + 1 + 10 + 1 + 15
-            print(f"{Colors.BOLD}{Colors.OKCYAN}State IRPF Tax Breakdown:{Colors.ENDC}\n")
-            print(f"  {Colors.UNDERLINE}{'Bracket':<25} {'Amount':<15} {'Rate':<10} {'Tax':<15}{Colors.ENDC}")
-            print(f"  {'-'*table_width}")
+            print(f"{Colors.BOLD}{Colors.OKCYAN}Beckham Law Tax Breakdown:{Colors.ENDC}\n")
+            if result.beckham_law_excess_tax > 0:
+                # Show both the flat rate portion and excess
+                print(f"  {Colors.UNDERLINE}{'Income Range':<25} {'Amount':<15} {'Rate':<10} {'Tax':<15}{Colors.ENDC}")
+                print(f"  {'-'*table_width}")
+                # Flat rate portion
+                flat_amount = min(result.taxable_income, BECKHAM_LAW_THRESHOLD)
+                print(f"  {Colors.OKBLUE}{'Up to €600,000':<25}{Colors.ENDC} "
+                      f"{format_currency_aligned(flat_amount, 15)} "
+                      f"{format_percentage(BECKHAM_LAW_RATE):>10} "
+                      f"{Colors.FAIL}{format_currency_aligned(result.beckham_law_tax, 15)}{Colors.ENDC}")
+                # Excess portion
+                excess_amount = result.taxable_income - BECKHAM_LAW_THRESHOLD
+                print(f"  {Colors.OKBLUE}{'Above €600,000':<25}{Colors.ENDC} "
+                      f"{format_currency_aligned(excess_amount, 15)} "
+                      f"{Colors.WARNING}{'Progressive':>10}{Colors.ENDC} "
+                      f"{Colors.FAIL}{format_currency_aligned(result.beckham_law_excess_tax, 15)}{Colors.ENDC}")
+                print()
+                # Show progressive breakdown for excess
+                if result.state_breakdown:
+                    print(f"{Colors.BOLD}{Colors.OKCYAN}Progressive Tax on Excess (>€600k):{Colors.ENDC}\n")
+                    print(f"  {Colors.UNDERLINE}{'Bracket':<25} {'Amount':<15} {'Rate':<10} {'Tax':<15}{Colors.ENDC}")
+                    print(f"  {'-'*table_width}")
+                    for bracket in result.state_breakdown:
+                        bracket_str = format_bracket_range(bracket.bracket_min, bracket.bracket_max)
+                        print(f"  {Colors.OKBLUE}{bracket_str:<25}{Colors.ENDC} "
+                              f"{format_currency_aligned(bracket.taxable_amount, 15)} "
+                              f"{format_percentage(bracket.rate):>10} "
+                              f"{Colors.FAIL}{format_currency_aligned(bracket.tax_amount, 15)}{Colors.ENDC}")
+                    print()
+            else:
+                # All income within threshold
+                print(f"  {Colors.UNDERLINE}{'Income Range':<25} {'Amount':<15} {'Rate':<10} {'Tax':<15}{Colors.ENDC}")
+                print(f"  {'-'*table_width}")
+                print(f"  {Colors.OKBLUE}{'All income':<25}{Colors.ENDC} "
+                      f"{format_currency_aligned(result.taxable_income, 15)} "
+                      f"{format_percentage(BECKHAM_LAW_RATE):>10} "
+                      f"{Colors.FAIL}{format_currency_aligned(result.beckham_law_tax, 15)}{Colors.ENDC}")
+                print()
+        else:
+            # Standard breakdown
+            if result.state_breakdown:
+                table_width = 25 + 1 + 15 + 1 + 10 + 1 + 15
+                print(f"{Colors.BOLD}{Colors.OKCYAN}State IRPF Tax Breakdown:{Colors.ENDC}\n")
+                print(f"  {Colors.UNDERLINE}{'Bracket':<25} {'Amount':<15} {'Rate':<10} {'Tax':<15}{Colors.ENDC}")
+                print(f"  {'-'*table_width}")
 
-            for bracket in result.state_breakdown:
-                bracket_str = format_bracket_range(bracket.bracket_min, bracket.bracket_max)
-                print(f"  {Colors.OKBLUE}{bracket_str:<25}{Colors.ENDC} "
-                      f"{format_currency_aligned(bracket.taxable_amount, 15)} "
-                      f"{format_percentage(bracket.rate):>10} "
-                      f"{Colors.FAIL}{format_currency_aligned(bracket.tax_amount, 15)}{Colors.ENDC}")
+                for bracket in result.state_breakdown:
+                    bracket_str = format_bracket_range(bracket.bracket_min, bracket.bracket_max)
+                    print(f"  {Colors.OKBLUE}{bracket_str:<25}{Colors.ENDC} "
+                          f"{format_currency_aligned(bracket.taxable_amount, 15)} "
+                          f"{format_percentage(bracket.rate):>10} "
+                          f"{Colors.FAIL}{format_currency_aligned(bracket.tax_amount, 15)}{Colors.ENDC}")
 
-            print()
+                print()
 
-        if result.regional_breakdown:
-            # Calculate exact table width: 25 + 1 + 15 + 1 + 10 + 1 + 15 = 68 (excluding the 2-space indent)
-            table_width = 25 + 1 + 15 + 1 + 10 + 1 + 15
-            print(f"{Colors.BOLD}{Colors.OKCYAN}Regional IRPF Tax Breakdown ({region_display}):{Colors.ENDC}\n")
-            print(f"  {Colors.UNDERLINE}{'Bracket':<25} {'Amount':<15} {'Rate':<10} {'Tax':<15}{Colors.ENDC}")
-            print(f"  {'-'*table_width}")
+            if result.regional_breakdown:
+                table_width = 25 + 1 + 15 + 1 + 10 + 1 + 15
+                print(f"{Colors.BOLD}{Colors.OKCYAN}Regional IRPF Tax Breakdown ({region_display}):{Colors.ENDC}\n")
+                print(f"  {Colors.UNDERLINE}{'Bracket':<25} {'Amount':<15} {'Rate':<10} {'Tax':<15}{Colors.ENDC}")
+                print(f"  {'-'*table_width}")
 
-            for bracket in result.regional_breakdown:
-                bracket_str = format_bracket_range(bracket.bracket_min, bracket.bracket_max)
-                print(f"  {Colors.OKBLUE}{bracket_str:<25}{Colors.ENDC} "
-                      f"{format_currency_aligned(bracket.taxable_amount, 15)} "
-                      f"{format_percentage(bracket.rate):>10} "
-                      f"{Colors.FAIL}{format_currency_aligned(bracket.tax_amount, 15)}{Colors.ENDC}")
+                for bracket in result.regional_breakdown:
+                    bracket_str = format_bracket_range(bracket.bracket_min, bracket.bracket_max)
+                    print(f"  {Colors.OKBLUE}{bracket_str:<25}{Colors.ENDC} "
+                          f"{format_currency_aligned(bracket.taxable_amount, 15)} "
+                          f"{format_percentage(bracket.rate):>10} "
+                          f"{Colors.FAIL}{format_currency_aligned(bracket.tax_amount, 15)}{Colors.ENDC}")
 
-            print()
+                print()
 
     # Monthly breakdown
     monthly_label_width = 20
@@ -354,6 +448,7 @@ Examples:
   %(prog)s 60000 --ss-rate 0.0635   # Use custom social security rate
   %(prog)s 60000 --region madrid    # Calculate for Madrid region
   %(prog)s 60000 --region catalonia # Calculate for Catalonia region
+  %(prog)s 100000 --beckham-law     # Apply Beckham Law (24%% flat rate)
 
 Available regions: madrid, catalonia, andalusia, valencia, basque, galicia, castilla_leon, canary_islands, none
         """
@@ -394,6 +489,12 @@ Available regions: madrid, catalonia, andalusia, valencia, basque, galicia, cast
     )
 
     parser.add_argument(
+        '--beckham-law',
+        action='store_true',
+        help='Apply Beckham Law (24%% flat rate on income up to €600,000). Income above €600k taxed at normal progressive rates. Regional tax does not apply.'
+    )
+
+    parser.add_argument(
         '--verbose', '-v',
         action='store_true',
         help='Show detailed tax bracket breakdown'
@@ -418,7 +519,7 @@ Available regions: madrid, catalonia, andalusia, valencia, basque, galicia, cast
 
     # Calculate tax
     try:
-        result = calculate_tax(annual_income, args.allowance, args.ss_rate, args.region)
+        result = calculate_tax(annual_income, args.allowance, args.ss_rate, args.region, args.beckham_law)
         print_results(result, args.verbose)
     except Exception as e:
         print(f"{Colors.FAIL}Error calculating tax: {e}{Colors.ENDC}", file=sys.stderr)
