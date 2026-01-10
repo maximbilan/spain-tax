@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Spanish IRPF (Personal Income Tax) Calculator
-Calculates personal income tax based on Spanish tax brackets.
+Calculates personal income tax and social security contributions based on Spanish tax brackets.
 """
 
 import argparse
@@ -13,7 +13,7 @@ from decimal import Decimal, ROUND_HALF_UP
 
 # Spanish IRPF tax brackets for 2024 (General State)
 # Format: (min_income, max_income, rate)
-TAX_BRACKETS = [
+STATE_TAX_BRACKETS = [
     (0, 12450, 0.19),
     (12450, 20200, 0.24),
     (20200, 35200, 0.30),
@@ -22,8 +22,83 @@ TAX_BRACKETS = [
     (300000, float('inf'), 0.47),
 ]
 
+# Regional IRPF tax brackets for 2024 (by Comunidad Autónoma)
+# Format: (min_income, max_income, rate)
+# These are applied in addition to state brackets
+REGIONAL_TAX_BRACKETS = {
+    'madrid': [
+        (0, 12450, 0.09),
+        (12450, 20200, 0.10),
+        (20200, 35200, 0.11),
+        (35200, 60000, 0.12),
+        (60000, 300000, 0.13),
+        (300000, float('inf'), 0.14),
+    ],
+    'catalonia': [
+        (0, 12450, 0.10),
+        (12450, 20200, 0.11),
+        (20200, 35200, 0.12),
+        (35200, 60000, 0.13),
+        (60000, 300000, 0.14),
+        (300000, float('inf'), 0.15),
+    ],
+    'andalusia': [
+        (0, 12450, 0.10),
+        (12450, 20200, 0.11),
+        (20200, 35200, 0.12),
+        (35200, 60000, 0.13),
+        (60000, 300000, 0.14),
+        (300000, float('inf'), 0.15),
+    ],
+    'valencia': [
+        (0, 12450, 0.10),
+        (12450, 20200, 0.11),
+        (20200, 35200, 0.12),
+        (35200, 60000, 0.13),
+        (60000, 300000, 0.14),
+        (300000, float('inf'), 0.15),
+    ],
+    'basque': [
+        (0, 12450, 0.09),
+        (12450, 20200, 0.10),
+        (20200, 35200, 0.11),
+        (35200, 60000, 0.12),
+        (60000, 300000, 0.13),
+        (300000, float('inf'), 0.14),
+    ],
+    'galicia': [
+        (0, 12450, 0.10),
+        (12450, 20200, 0.11),
+        (20200, 35200, 0.12),
+        (35200, 60000, 0.13),
+        (60000, 300000, 0.14),
+        (300000, float('inf'), 0.15),
+    ],
+    'castilla_leon': [
+        (0, 12450, 0.09),
+        (12450, 20200, 0.10),
+        (20200, 35200, 0.11),
+        (35200, 60000, 0.12),
+        (60000, 300000, 0.13),
+        (300000, float('inf'), 0.14),
+    ],
+    'canary_islands': [
+        (0, 12450, 0.08),
+        (12450, 20200, 0.09),
+        (20200, 35200, 0.10),
+        (35200, 60000, 0.11),
+        (60000, 300000, 0.12),
+        (300000, float('inf'), 0.13),
+    ],
+    'none': [],  # No regional tax
+}
+
 # Personal allowance (minimum personal exemption)
 PERSONAL_ALLOWANCE = 5550  # euros per year
+
+# Social Security rate (employee contribution)
+# Typical rate is 6.35% of gross salary for employees
+SOCIAL_SECURITY_RATE = 0.0635  # 6.35%
 
 
 @dataclass
@@ -40,12 +115,19 @@ class TaxBreakdown:
 class TaxResult:
     """Complete tax calculation result."""
     gross_income: float
+    social_security_tax: float
+    income_after_ss: float
     personal_allowance: float
     taxable_income: float
-    total_tax: float
+    state_irpf_tax: float
+    regional_irpf_tax: float
+    irpf_tax: float  # Total IRPF (state + regional)
+    total_deductions: float
     net_income: float
     effective_rate: float
-    breakdown: List[TaxBreakdown]
+    region: str
+    state_breakdown: List[TaxBreakdown]
+    regional_breakdown: List[TaxBreakdown]
 
 
 class Colors:
@@ -66,6 +148,12 @@ def format_currency(amount: float) -> str:
     return f"€{amount:,.2f}".replace(',', ' ').replace('.', ',')
 
 
+def format_currency_aligned(amount: float, width: int = 18) -> str:
+    """Format amount as currency with Euro symbol, right-aligned to specified width."""
+    formatted = f"€{amount:,.2f}".replace(',', ' ').replace('.', ',')
+    return f"{formatted:>{width}}"
+
+
 def format_percentage(rate: float) -> str:
     """Format rate as percentage."""
     return f"{rate * 100:.2f}%"
@@ -80,36 +168,21 @@ def format_bracket_range(min_val: float, max_val: float = None) -> str:
     return f"{min_str} - {max_str}"
 
 
-def calculate_tax(gross_income: float, personal_allowance: float = PERSONAL_ALLOWANCE) -> TaxResult:
-    """
-    Calculate Spanish IRPF tax based on progressive brackets.
-
-    Args:
-        gross_income: Annual gross income in euros
-        personal_allowance: Personal allowance amount (default: 5550)
-
-    Returns:
-        TaxResult object with complete calculation breakdown
-    """
-    # Calculate taxable income (after personal allowance)
-    taxable_income = max(0, gross_income - personal_allowance)
-
+def calculate_bracket_tax(taxable_income: float, brackets: List[Tuple[float, float, float]]) -> Tuple[float, List[TaxBreakdown]]:
+    """Calculate tax for given brackets and return tax amount and breakdown."""
     breakdown = []
     total_tax = 0.0
     remaining_income = taxable_income
 
-    # Calculate tax for each bracket
-    for bracket_min, bracket_max, rate in TAX_BRACKETS:
+    for bracket_min, bracket_max, rate in brackets:
         if remaining_income <= 0:
             break
 
-        # Calculate how much of remaining income falls in this bracket
         bracket_upper = min(bracket_max, taxable_income)
 
         if bracket_upper <= bracket_min:
             continue
 
-        # Income in this bracket
         income_in_bracket = min(remaining_income, bracket_upper - bracket_min)
 
         if income_in_bracket > 0:
@@ -126,65 +199,151 @@ def calculate_tax(gross_income: float, personal_allowance: float = PERSONAL_ALLO
 
             remaining_income -= income_in_bracket
 
-    # Calculate net income and effective rate
-    net_income = gross_income - total_tax
-    effective_rate = (total_tax / gross_income * 100) if gross_income > 0 else 0
+    return total_tax, breakdown
+
+
+def calculate_tax(gross_income: float, personal_allowance: float = PERSONAL_ALLOWANCE, social_security_rate: float = SOCIAL_SECURITY_RATE, region: str = 'none') -> TaxResult:
+    """
+    Calculate Spanish IRPF tax (state + regional) and social security contributions based on progressive brackets.
+
+    Args:
+        gross_income: Annual gross income in euros
+        personal_allowance: Personal allowance amount (default: 5550)
+        social_security_rate: Social security rate (default: 0.0635 = 6.35%)
+        region: Spanish region (default: 'none'). Options: madrid, catalonia, andalusia, valencia, basque, galicia, castilla_leon, canary_islands, none
+
+    Returns:
+        TaxResult object with complete calculation breakdown
+    """
+    # Normalize region name
+    region = region.lower()
+
+    # Step 1: Calculate Social Security (deducted from gross income)
+    social_security_tax = gross_income * social_security_rate
+    income_after_ss = gross_income - social_security_tax
+
+    # Step 2: Calculate taxable income for IRPF (after social security and personal allowance)
+    taxable_income = max(0, income_after_ss - personal_allowance)
+
+    # Step 3: Calculate State IRPF tax
+    state_irpf_tax, state_breakdown = calculate_bracket_tax(taxable_income, STATE_TAX_BRACKETS)
+
+    # Step 4: Calculate Regional IRPF tax
+    regional_brackets = REGIONAL_TAX_BRACKETS.get(region, REGIONAL_TAX_BRACKETS['none'])
+    regional_irpf_tax, regional_breakdown = calculate_bracket_tax(taxable_income, regional_brackets)
+
+    # Step 5: Calculate total IRPF (state + regional)
+    irpf_tax = state_irpf_tax + regional_irpf_tax
+
+    # Step 6: Calculate total deductions and net income
+    total_deductions = social_security_tax + irpf_tax
+    net_income = gross_income - total_deductions
+    effective_rate = (total_deductions / gross_income * 100) if gross_income > 0 else 0
 
     return TaxResult(
         gross_income=gross_income,
+        social_security_tax=social_security_tax,
+        income_after_ss=income_after_ss,
         personal_allowance=personal_allowance,
         taxable_income=taxable_income,
-        total_tax=total_tax,
+        state_irpf_tax=state_irpf_tax,
+        regional_irpf_tax=regional_irpf_tax,
+        irpf_tax=irpf_tax,
+        total_deductions=total_deductions,
         net_income=net_income,
         effective_rate=effective_rate,
-        breakdown=breakdown
+        region=region,
+        state_breakdown=state_breakdown,
+        regional_breakdown=regional_breakdown
     )
 
 
 def print_results(result: TaxResult, verbose: bool = False):
     """Print tax calculation results with colored output."""
+    region_display = result.region.replace('_', ' ').title() if result.region != 'none' else 'None (State only)'
     print(f"\n{Colors.BOLD}{Colors.HEADER}{'='*60}{Colors.ENDC}")
-    print(f"{Colors.BOLD}{Colors.HEADER}  Spanish IRPF Tax Calculation{Colors.ENDC}")
+    print(f"{Colors.BOLD}{Colors.HEADER}  Spanish Tax Calculation (IRPF + Social Security){Colors.ENDC}")
+    print(f"{Colors.BOLD}{Colors.HEADER}  Region: {region_display}{Colors.ENDC}")
     print(f"{Colors.BOLD}{Colors.HEADER}{'='*60}{Colors.ENDC}\n")
 
-    # Summary section
+    # Summary section - align all numbers to the same column
+    label_width = 25  # Width for labels
+    value_width = 20  # Width for values (right-aligned)
+    
     print(f"{Colors.BOLD}{Colors.OKCYAN}Summary:{Colors.ENDC}")
-    print(f"  {Colors.OKBLUE}Gross Income:{Colors.ENDC}        {Colors.BOLD}{format_currency(result.gross_income)}{Colors.ENDC}")
-    print(f"  {Colors.OKBLUE}Personal Allowance:{Colors.ENDC}  {format_currency(result.personal_allowance)}")
-    print(f"  {Colors.OKBLUE}Taxable Income:{Colors.ENDC}      {format_currency(result.taxable_income)}")
-    print(f"  {Colors.FAIL}Total Tax:{Colors.ENDC}            {Colors.BOLD}{Colors.FAIL}{format_currency(result.total_tax)}{Colors.ENDC}")
-    print(f"  {Colors.OKGREEN}Net Income:{Colors.ENDC}          {Colors.BOLD}{Colors.OKGREEN}{format_currency(result.net_income)}{Colors.ENDC}")
-    print(f"  {Colors.WARNING}Effective Tax Rate:{Colors.ENDC}  {Colors.BOLD}{format_percentage(result.effective_rate / 100)}{Colors.ENDC}\n")
+    print(f"  {Colors.OKBLUE}{'Gross Income:':<{label_width}}{Colors.ENDC} {Colors.BOLD}{format_currency_aligned(result.gross_income, value_width)}{Colors.ENDC}")
+    print(f"  {Colors.FAIL}{'Social Security:':<{label_width}}{Colors.ENDC} {Colors.FAIL}{format_currency_aligned(result.social_security_tax, value_width)}{Colors.ENDC}")
+    print(f"  {Colors.OKBLUE}{'Income after SS:':<{label_width}}{Colors.ENDC} {format_currency_aligned(result.income_after_ss, value_width)}")
+    print(f"  {Colors.OKBLUE}{'Personal Allowance:':<{label_width}}{Colors.ENDC} {format_currency_aligned(result.personal_allowance, value_width)}")
+    print(f"  {Colors.OKBLUE}{'Taxable Income (IRPF):':<{label_width}}{Colors.ENDC} {format_currency_aligned(result.taxable_income, value_width)}")
+    print(f"  {Colors.FAIL}{'State IRPF Tax:':<{label_width}}{Colors.ENDC} {Colors.FAIL}{format_currency_aligned(result.state_irpf_tax, value_width)}{Colors.ENDC}")
+    if result.regional_irpf_tax > 0:
+        print(f"  {Colors.FAIL}{'Regional IRPF Tax:':<{label_width}}{Colors.ENDC} {Colors.FAIL}{format_currency_aligned(result.regional_irpf_tax, value_width)}{Colors.ENDC}")
+    print(f"  {Colors.FAIL}{'Total IRPF Tax:':<{label_width}}{Colors.ENDC} {Colors.FAIL}{format_currency_aligned(result.irpf_tax, value_width)}{Colors.ENDC}")
+    print(f"  {Colors.FAIL}{'Total Deductions:':<{label_width}}{Colors.ENDC} {Colors.BOLD}{Colors.FAIL}{format_currency_aligned(result.total_deductions, value_width)}{Colors.ENDC}")
+    print(f"  {Colors.OKGREEN}{'Net Income:':<{label_width}}{Colors.ENDC} {Colors.BOLD}{Colors.OKGREEN}{format_currency_aligned(result.net_income, value_width)}{Colors.ENDC}")
+    print(f"  {Colors.WARNING}{'Effective Tax Rate:':<{label_width}}{Colors.ENDC} {Colors.BOLD}{format_percentage(result.effective_rate / 100):>{value_width}}{Colors.ENDC}\n")
 
-    if verbose and result.breakdown:
-        print(f"{Colors.BOLD}{Colors.OKCYAN}Tax Breakdown by Bracket:{Colors.ENDC}\n")
-        print(f"  {Colors.UNDERLINE}{'Bracket':<25} {'Amount':<15} {'Rate':<10} {'Tax':<15}{Colors.ENDC}")
-        print(f"  {'-'*65}")
+    if verbose:
+        if result.state_breakdown:
+            # Calculate exact table width: 25 + 1 + 15 + 1 + 10 + 1 + 15 = 68 (excluding the 2-space indent)
+            table_width = 25 + 1 + 15 + 1 + 10 + 1 + 15
+            print(f"{Colors.BOLD}{Colors.OKCYAN}State IRPF Tax Breakdown:{Colors.ENDC}\n")
+            print(f"  {Colors.UNDERLINE}{'Bracket':<25} {'Amount':<15} {'Rate':<10} {'Tax':<15}{Colors.ENDC}")
+            print(f"  {'-'*table_width}")
 
-        for i, bracket in enumerate(result.breakdown, 1):
-            bracket_str = format_bracket_range(bracket.bracket_min, bracket.bracket_max)
-            print(f"  {Colors.OKBLUE}{bracket_str:<25}{Colors.ENDC} "
-                  f"{format_currency(bracket.taxable_amount):<15} "
-                  f"{format_percentage(bracket.rate):<10} "
-                  f"{Colors.FAIL}{format_currency(bracket.tax_amount)}{Colors.ENDC}")
+            for bracket in result.state_breakdown:
+                bracket_str = format_bracket_range(bracket.bracket_min, bracket.bracket_max)
+                print(f"  {Colors.OKBLUE}{bracket_str:<25}{Colors.ENDC} "
+                      f"{format_currency_aligned(bracket.taxable_amount, 15)} "
+                      f"{format_percentage(bracket.rate):>10} "
+                      f"{Colors.FAIL}{format_currency_aligned(bracket.tax_amount, 15)}{Colors.ENDC}")
 
-        print()
+            print()
+
+        if result.regional_breakdown:
+            # Calculate exact table width: 25 + 1 + 15 + 1 + 10 + 1 + 15 = 68 (excluding the 2-space indent)
+            table_width = 25 + 1 + 15 + 1 + 10 + 1 + 15
+            print(f"{Colors.BOLD}{Colors.OKCYAN}Regional IRPF Tax Breakdown ({region_display}):{Colors.ENDC}\n")
+            print(f"  {Colors.UNDERLINE}{'Bracket':<25} {'Amount':<15} {'Rate':<10} {'Tax':<15}{Colors.ENDC}")
+            print(f"  {'-'*table_width}")
+
+            for bracket in result.regional_breakdown:
+                bracket_str = format_bracket_range(bracket.bracket_min, bracket.bracket_max)
+                print(f"  {Colors.OKBLUE}{bracket_str:<25}{Colors.ENDC} "
+                      f"{format_currency_aligned(bracket.taxable_amount, 15)} "
+                      f"{format_percentage(bracket.rate):>10} "
+                      f"{Colors.FAIL}{format_currency_aligned(bracket.tax_amount, 15)}{Colors.ENDC}")
+
+            print()
 
     # Monthly breakdown
+    monthly_label_width = 20
+    monthly_value_width = 20
+    
     print(f"{Colors.BOLD}{Colors.OKCYAN}Monthly Breakdown:{Colors.ENDC}")
     monthly_gross = result.gross_income / 12
-    monthly_tax = result.total_tax / 12
+    monthly_ss = result.social_security_tax / 12
+    monthly_state_irpf = result.state_irpf_tax / 12
+    monthly_regional_irpf = result.regional_irpf_tax / 12
+    monthly_irpf = result.irpf_tax / 12
+    monthly_deductions = result.total_deductions / 12
     monthly_net = result.net_income / 12
-    print(f"  {Colors.OKBLUE}Gross:{Colors.ENDC}  {format_currency(monthly_gross)}")
-    print(f"  {Colors.FAIL}Tax:{Colors.ENDC}   {format_currency(monthly_tax)}")
-    print(f"  {Colors.OKGREEN}Net:{Colors.ENDC}    {format_currency(monthly_net)}")
+    print(f"  {Colors.OKBLUE}{'Gross:':<{monthly_label_width}}{Colors.ENDC} {format_currency_aligned(monthly_gross, monthly_value_width)}")
+    print(f"  {Colors.FAIL}{'Social Security:':<{monthly_label_width}}{Colors.ENDC} {format_currency_aligned(monthly_ss, monthly_value_width)}")
+    print(f"  {Colors.FAIL}{'State IRPF:':<{monthly_label_width}}{Colors.ENDC} {format_currency_aligned(monthly_state_irpf, monthly_value_width)}")
+    if result.regional_irpf_tax > 0:
+        print(f"  {Colors.FAIL}{'Regional IRPF:':<{monthly_label_width}}{Colors.ENDC} {format_currency_aligned(monthly_regional_irpf, monthly_value_width)}")
+    print(f"  {Colors.FAIL}{'Total IRPF:':<{monthly_label_width}}{Colors.ENDC} {format_currency_aligned(monthly_irpf, monthly_value_width)}")
+    print(f"  {Colors.FAIL}{'Total Deductions:':<{monthly_label_width}}{Colors.ENDC} {format_currency_aligned(monthly_deductions, monthly_value_width)}")
+    print(f"  {Colors.OKGREEN}{'Net:':<{monthly_label_width}}{Colors.ENDC} {format_currency_aligned(monthly_net, monthly_value_width)}")
     print()
 
 
 def main():
     """Main entry point for the CLI tool."""
     parser = argparse.ArgumentParser(
-        description='Calculate Spanish IRPF (Personal Income Tax)',
+        description='Calculate Spanish IRPF (Personal Income Tax) and Social Security',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -192,6 +351,11 @@ Examples:
   %(prog)s 50000 --verbose          # Show detailed bracket breakdown
   %(prog)s 45000 --allowance 7000   # Use custom personal allowance
   %(prog)s 35000 --monthly          # Input as monthly income
+  %(prog)s 60000 --ss-rate 0.0635   # Use custom social security rate
+  %(prog)s 60000 --region madrid    # Calculate for Madrid region
+  %(prog)s 60000 --region catalonia # Calculate for Catalonia region
+
+Available regions: madrid, catalonia, andalusia, valencia, basque, galicia, castilla_leon, canary_islands, none
         """
     )
 
@@ -215,6 +379,21 @@ Examples:
     )
 
     parser.add_argument(
+        '--ss-rate',
+        type=float,
+        default=SOCIAL_SECURITY_RATE,
+        help=f'Social security rate as decimal (default: {SOCIAL_SECURITY_RATE:.4f} = {SOCIAL_SECURITY_RATE*100:.2f}%%)'
+    )
+
+    parser.add_argument(
+        '--region',
+        type=str,
+        default='none',
+        choices=['madrid', 'catalonia', 'andalusia', 'valencia', 'basque', 'galicia', 'castilla_leon', 'canary_islands', 'none'],
+        help='Spanish region for regional IRPF tax (default: none). Options: madrid, catalonia, andalusia, valencia, basque, galicia, castilla_leon, canary_islands, none'
+    )
+
+    parser.add_argument(
         '--verbose', '-v',
         action='store_true',
         help='Show detailed tax bracket breakdown'
@@ -233,9 +412,13 @@ Examples:
         print(f"{Colors.FAIL}Error: Income cannot be negative{Colors.ENDC}", file=sys.stderr)
         sys.exit(1)
 
+    if args.ss_rate < 0 or args.ss_rate > 1:
+        print(f"{Colors.FAIL}Error: Social security rate must be between 0 and 1{Colors.ENDC}", file=sys.stderr)
+        sys.exit(1)
+
     # Calculate tax
     try:
-        result = calculate_tax(annual_income, args.allowance)
+        result = calculate_tax(annual_income, args.allowance, args.ss_rate, args.region)
         print_results(result, args.verbose)
     except Exception as e:
         print(f"{Colors.FAIL}Error calculating tax: {e}{Colors.ENDC}", file=sys.stderr)
