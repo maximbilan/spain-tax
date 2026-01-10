@@ -8,7 +8,6 @@ import argparse
 import sys
 from typing import List, Tuple
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_HALF_UP
 
 
 # Spanish IRPF tax brackets for 2024 (General State)
@@ -204,11 +203,6 @@ class Colors:
     ENDC = '\033[0m'
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
-
-
-def format_currency(amount: float) -> str:
-    """Format amount as currency with Euro symbol."""
-    return f"€{amount:,.2f}".replace(',', ' ').replace('.', ',')
 
 
 def format_currency_aligned(amount: float, width: int = 18) -> str:
