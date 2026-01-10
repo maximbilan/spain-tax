@@ -12,6 +12,14 @@ A comprehensive command-line tool for calculating Spanish personal income tax (I
 - **Beautiful Output**: Color-coded, aligned output with detailed breakdowns
 - **Flexible Input**: Support for annual or monthly income input
 
+## Screenshots
+
+```
+./run.sh 120000 --age 35 --children-under-3 1 --children-3-plus 2 --ascendants-65 2 --region valencia --verbose
+```
+
+<img width="567" height="848" alt="Screenshot 2026-01-10 at 16 32 52" src="https://github.com/user-attachments/assets/311690b5-dec3-4492-b989-7641f3e7548a" />
+
 ## Installation
 
 ### Prerequisites
