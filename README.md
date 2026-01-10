@@ -1,4 +1,4 @@
-# Spanish Tax Calculator
+# Spain Tax Calculator 🇪🇸
 
 A comprehensive command-line tool for calculating Spanish personal income tax (IRPF) and Social Security contributions. This calculator supports all major tax scenarios including regional variations, dependent allowances, age-based adjustments, and special tax regimes like Beckham Law.
 
