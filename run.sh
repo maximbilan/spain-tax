@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Spanish IRPF Tax Calculator - Setup and Run Script
+# Spanish Tax Calculator - Setup and Run Script
 # This script creates a virtual environment, installs dependencies, and runs the calculator
 
 set -e  # Exit on error
@@ -17,7 +17,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 echo -e "${BLUE}========================================${NC}"
-echo -e "${BLUE}Spanish IRPF Tax Calculator${NC}"
+echo -e "${BLUE}Spanish Tax Calculator${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
 
@@ -67,7 +67,7 @@ if [ $# -eq 0 ]; then
     echo ""
     echo -e "${BLUE}Running with example income of €60,000...${NC}"
     echo ""
-    $PYTHON_CMD "$SCRIPT_DIR/irpf_calculator.py" 60000 --verbose
+    $PYTHON_CMD "$SCRIPT_DIR/tax_calculator.py" 60000 --verbose
 else
-    $PYTHON_CMD "$SCRIPT_DIR/irpf_calculator.py" "$@"
+    $PYTHON_CMD "$SCRIPT_DIR/tax_calculator.py" "$@"
 fi

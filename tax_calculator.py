@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Spanish IRPF (Personal Income Tax) Calculator
-Calculates personal income tax and social security contributions based on Spanish tax brackets.
+Spanish Tax Calculator
+Calculates personal income tax (IRPF) and social security contributions based on Spanish tax brackets.
 """
 
 import argparse
