@@ -95,7 +95,6 @@ REGIONAL_TAX_BRACKETS = {
 PERSONAL_ALLOWANCE_UNDER_65 = 5550  # Under 65 years old
 PERSONAL_ALLOWANCE_65_74 = 6700  # 65-74 years old
 PERSONAL_ALLOWANCE_75_PLUS = 8100  # 75+ years old
-PERSONAL_ALLOWANCE = PERSONAL_ALLOWANCE_UNDER_65  # Default (for backward compatibility)
 
 # Dependent allowances (2024 rates)
 # Children (descendientes)
@@ -754,7 +753,7 @@ Available regions: madrid, catalonia, andalusia, valencia, basque, galicia, cast
         '--allowance',
         type=float,
         default=None,
-        help=f'Personal allowance amount (overrides age-based calculation if provided). Default: €{PERSONAL_ALLOWANCE:,.0f} or age-based'
+        help=f'Personal allowance amount (overrides age-based calculation if provided). Default: €{PERSONAL_ALLOWANCE_UNDER_65:,.0f} or age-based'
     )
 
     parser.add_argument(
