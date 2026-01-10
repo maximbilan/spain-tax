@@ -9,7 +9,6 @@ import sys
 from typing import List, Tuple, Optional
 from dataclasses import dataclass
 
-
 # Spanish IRPF tax brackets for 2024 (General State)
 # Format: (min_income, max_income, rate)
 STATE_TAX_BRACKETS = [
@@ -152,7 +151,7 @@ AGE_THRESHOLD_75 = 75
 MAX_REASONABLE_AGE = 120
 
 # Valid regions
-VALID_REGIONS = ['madrid', 'catalonia', 'andalusia', 'valencia', 'basque', 
+VALID_REGIONS = ['madrid', 'catalonia', 'andalusia', 'valencia', 'basque',
                  'galicia', 'castilla_leon', 'canary_islands', 'none']
 
 
@@ -248,34 +247,34 @@ def _calculate_children_allowances(dependents: DependentInfo) -> float:
     """Calculate allowances for children based on order and age."""
     total = 0.0
     total_children = dependents.children_under_3 + dependents.children_3_plus
-    
+
     # Base allowances by child order
     child_allowances = [
         ALLOWANCE_FIRST_CHILD,
         ALLOWANCE_SECOND_CHILD,
         ALLOWANCE_THIRD_CHILD,
     ]
-    
+
     for i in range(min(total_children, 3)):
         total += child_allowances[i]
         # Add under-3 bonus for each child under 3
         if i < dependents.children_under_3:
             total += ALLOWANCE_CHILD_UNDER_3
-    
+
     # Fourth and subsequent children
     for i in range(4, total_children + 1):
         total += ALLOWANCE_FOURTH_PLUS_CHILD
         if i <= dependents.children_under_3:
             total += ALLOWANCE_CHILD_UNDER_3
-    
+
     # Additional under-3 allowances for children beyond the first 3
     if dependents.children_under_3 > 3:
         total += (dependents.children_under_3 - 3) * ALLOWANCE_CHILD_UNDER_3
-    
+
     # Disability allowances for children
     total += dependents.children_disability_33 * ALLOWANCE_CHILD_DISABILITY_33
     total += dependents.children_disability_65 * ALLOWANCE_CHILD_DISABILITY_65
-    
+
     return total
 
 
@@ -291,12 +290,12 @@ def _calculate_ascendant_allowances(dependents: DependentInfo) -> float:
 def _calculate_family_status_allowances(dependents: DependentInfo) -> float:
     """Calculate allowances based on family status."""
     total = 0.0
-    
+
     if dependents.large_family_special:
         total += ALLOWANCE_LARGE_FAMILY_SPECIAL
     elif dependents.large_family:
         total += ALLOWANCE_LARGE_FAMILY_GENERAL
-    
+
     if dependents.single_parent:
         total += ALLOWANCE_SINGLE_PARENT
     
@@ -384,7 +383,7 @@ def _calculate_beckham_law_tax(taxable_income: float) -> Tuple[float, float, flo
     if taxable_income <= BECKHAM_LAW_THRESHOLD:
         beckham_law_tax = taxable_income * BECKHAM_LAW_RATE
         return beckham_law_tax, 0.0, beckham_law_tax, []
-    
+
     # Income up to threshold: 24%
     beckham_law_tax = BECKHAM_LAW_THRESHOLD * BECKHAM_LAW_RATE
     # Income above threshold: normal progressive rates
@@ -522,16 +521,16 @@ def _print_summary(result: TaxResult):
     print(f"  {Colors.OKBLUE}{'Gross Income:':<{SUMMARY_LABEL_WIDTH}}{Colors.ENDC} {Colors.BOLD}{format_currency_aligned(result.gross_income, SUMMARY_VALUE_WIDTH)}{Colors.ENDC}")
     print(f"  {Colors.FAIL}{'Social Security:':<{SUMMARY_LABEL_WIDTH}}{Colors.ENDC} {Colors.FAIL}{format_currency_aligned(result.social_security_tax, SUMMARY_VALUE_WIDTH)}{Colors.ENDC}")
     print(f"  {Colors.OKBLUE}{'Income after SS:':<{SUMMARY_LABEL_WIDTH}}{Colors.ENDC} {format_currency_aligned(result.income_after_ss, SUMMARY_VALUE_WIDTH)}")
-    
+
     if not result.beckham_law:
         allowance_label = _get_personal_allowance_label(result)
         print(f"  {Colors.OKBLUE}{allowance_label:<{SUMMARY_LABEL_WIDTH}}{Colors.ENDC} {format_currency_aligned(result.personal_allowance, SUMMARY_VALUE_WIDTH)}")
         if result.dependent_allowances > 0:
             print(f"  {Colors.OKBLUE}{'Dependent Allowances:':<{SUMMARY_LABEL_WIDTH}}{Colors.ENDC} {format_currency_aligned(result.dependent_allowances, SUMMARY_VALUE_WIDTH)}")
             print(f"  {Colors.OKBLUE}{'Total Allowances:':<{SUMMARY_LABEL_WIDTH}}{Colors.ENDC} {format_currency_aligned(result.total_allowances, SUMMARY_VALUE_WIDTH)}")
-    
+
     print(f"  {Colors.OKBLUE}{'Taxable Income (IRPF):':<{SUMMARY_LABEL_WIDTH}}{Colors.ENDC} {format_currency_aligned(result.taxable_income, SUMMARY_VALUE_WIDTH)}")
-    
+
     if result.beckham_law:
         print(f"  {Colors.FAIL}{'Beckham Law Tax (24%):':<{SUMMARY_LABEL_WIDTH}}{Colors.ENDC} {Colors.FAIL}{format_currency_aligned(result.beckham_law_tax, SUMMARY_VALUE_WIDTH)}{Colors.ENDC}")
         if result.beckham_law_excess_tax > 0:
@@ -540,7 +539,7 @@ def _print_summary(result: TaxResult):
         print(f"  {Colors.FAIL}{'State IRPF Tax:':<{SUMMARY_LABEL_WIDTH}}{Colors.ENDC} {Colors.FAIL}{format_currency_aligned(result.state_irpf_tax, SUMMARY_VALUE_WIDTH)}{Colors.ENDC}")
         if result.regional_irpf_tax > 0:
             print(f"  {Colors.FAIL}{'Regional IRPF Tax:':<{SUMMARY_LABEL_WIDTH}}{Colors.ENDC} {Colors.FAIL}{format_currency_aligned(result.regional_irpf_tax, SUMMARY_VALUE_WIDTH)}{Colors.ENDC}")
-    
+
     print(f"  {Colors.FAIL}{'Total IRPF Tax:':<{SUMMARY_LABEL_WIDTH}}{Colors.ENDC} {Colors.FAIL}{format_currency_aligned(result.irpf_tax, SUMMARY_VALUE_WIDTH)}{Colors.ENDC}")
     print(f"  {Colors.FAIL}{'Total Deductions:':<{SUMMARY_LABEL_WIDTH}}{Colors.ENDC} {Colors.BOLD}{Colors.FAIL}{format_currency_aligned(result.total_deductions, SUMMARY_VALUE_WIDTH)}{Colors.ENDC}")
     print(f"  {Colors.OKGREEN}{'Net Income:':<{SUMMARY_LABEL_WIDTH}}{Colors.ENDC} {Colors.BOLD}{Colors.OKGREEN}{format_currency_aligned(result.net_income, SUMMARY_VALUE_WIDTH)}{Colors.ENDC}")
@@ -566,7 +565,7 @@ def _print_beckham_law_breakdown(result: TaxResult):
     print(f"{Colors.BOLD}{Colors.OKCYAN}Beckham Law Tax Breakdown:{Colors.ENDC}\n")
     print(f"  {Colors.UNDERLINE}{'Income Range':<25} {'Amount':<15} {'Rate':<10} {'Tax':<15}{Colors.ENDC}")
     print(f"  {'-'*TABLE_WIDTH}")
-    
+
     if result.beckham_law_excess_tax > 0:
         # Show both the flat rate portion and excess
         flat_amount = min(result.taxable_income, BECKHAM_LAW_THRESHOLD)
@@ -613,7 +612,7 @@ def _print_monthly_breakdown(result: TaxResult):
     monthly_irpf = result.irpf_tax / MONTHS_PER_YEAR
     monthly_deductions = result.total_deductions / MONTHS_PER_YEAR
     monthly_net = result.net_income / MONTHS_PER_YEAR
-    
+
     print(f"  {Colors.OKBLUE}{'Gross:':<{MONTHLY_LABEL_WIDTH}}{Colors.ENDC} {format_currency_aligned(monthly_gross, MONTHLY_VALUE_WIDTH)}")
     print(f"  {Colors.FAIL}{'Social Security:':<{MONTHLY_LABEL_WIDTH}}{Colors.ENDC} {format_currency_aligned(monthly_ss, MONTHLY_VALUE_WIDTH)}")
     print(f"  {Colors.FAIL}{'State IRPF:':<{MONTHLY_LABEL_WIDTH}}{Colors.ENDC} {format_currency_aligned(monthly_state_irpf, MONTHLY_VALUE_WIDTH)}")
@@ -629,10 +628,10 @@ def print_results(result: TaxResult, verbose: bool = False):
     """Print tax calculation results with colored output."""
     _print_header(result)
     _print_summary(result)
-    
+
     if verbose:
         _print_verbose_breakdown(result)
-    
+
     _print_monthly_breakdown(result)
 
 
