@@ -36,6 +36,13 @@ from tax_calculator import (
     ALLOWANCE_DISABILITY_65,
     ALLOWANCE_DISABILITY_MOBILITY,
     ALLOWANCE_DISABILITY_DEPENDENCY,
+    AUTONOMO_MIN_BASE_MONTHLY,
+    AUTONOMO_MAX_BASE_MONTHLY,
+    AUTONOMO_FULL_RATE,
+    AUTONOMO_REDUCED_RATE_MONTHS_1_12,
+    AUTONOMO_REDUCED_RATE_MONTHS_13_24,
+    AUTONOMO_DEFAULT_BASE_PERCENTAGE,
+    AUTONOMO_GENERAL_EXPENSE_RATE,
 )
 
 
@@ -623,6 +630,154 @@ class TestTaxResultStructure(unittest.TestCase):
         # Total allowances should equal personal + dependent
         self.assertAlmostEqual(result.total_allowances,
                               result.personal_allowance + result.dependent_allowances, places=2)
+
+
+class TestAutonomoCalculation(unittest.TestCase):
+    """Test autónomo (self-employed) tax calculation."""
+
+    def test_autonomo_basic(self):
+        """Test basic autónomo calculation."""
+        result = calculate_tax(60000, region='madrid', is_autonomo=True)
+        self.assertTrue(result.is_autonomo)
+        self.assertIsNotNone(result.contribution_base)
+        # Should have social security tax
+        self.assertGreater(result.social_security_tax, 0)
+        # Personal allowance should not apply for autónomos
+        self.assertEqual(result.personal_allowance, 0)
+        self.assertEqual(result.total_allowances, 0)
+
+    def test_autonomo_reduced_rate_months_1_12(self):
+        """Test autónomo with reduced rate for first 12 months."""
+        result = calculate_tax(60000, region='madrid', is_autonomo=True, months_as_autonomo=6)
+        self.assertTrue(result.is_autonomo)
+        self.assertEqual(result.months_as_autonomo, 6)
+        # Should use reduced rate: €80/month
+        expected_ss = AUTONOMO_REDUCED_RATE_MONTHS_1_12 * 12
+        self.assertAlmostEqual(result.social_security_tax, expected_ss, places=2)
+
+    def test_autonomo_reduced_rate_months_13_24(self):
+        """Test autónomo with reduced rate for months 13-24."""
+        result = calculate_tax(60000, region='madrid', is_autonomo=True, months_as_autonomo=18)
+        self.assertTrue(result.is_autonomo)
+        self.assertEqual(result.months_as_autonomo, 18)
+        # Should use reduced rate: €160/month
+        expected_ss = AUTONOMO_REDUCED_RATE_MONTHS_13_24 * 12
+        self.assertAlmostEqual(result.social_security_tax, expected_ss, places=2)
+
+    def test_autonomo_full_rate(self):
+        """Test autónomo with full rate (25+ months)."""
+        result = calculate_tax(60000, region='madrid', is_autonomo=True, months_as_autonomo=25)
+        self.assertTrue(result.is_autonomo)
+        self.assertEqual(result.months_as_autonomo, 25)
+        # Should use full rate: 30% of contribution base
+        monthly_base = result.contribution_base / 12
+        expected_ss = monthly_base * AUTONOMO_FULL_RATE * 12
+        self.assertAlmostEqual(result.social_security_tax, expected_ss, places=0)
+
+    def test_autonomo_contribution_base_estimation(self):
+        """Test autónomo contribution base estimation."""
+        income = 60000
+        result = calculate_tax(income, region='madrid', is_autonomo=True)
+        # Contribution base should be estimated as percentage of income
+        expected_monthly_base = (income / 12) * AUTONOMO_DEFAULT_BASE_PERCENTAGE
+        # Clamped to min/max
+        expected_monthly_base = max(AUTONOMO_MIN_BASE_MONTHLY, 
+                                   min(expected_monthly_base, AUTONOMO_MAX_BASE_MONTHLY))
+        expected_annual_base = expected_monthly_base * 12
+        self.assertAlmostEqual(result.contribution_base, expected_annual_base, places=2)
+
+    def test_autonomo_custom_contribution_base(self):
+        """Test autónomo with custom contribution base."""
+        custom_base = 40000  # annual
+        result = calculate_tax(60000, region='madrid', is_autonomo=True, 
+                              contribution_base=custom_base, months_as_autonomo=25)
+        self.assertEqual(result.contribution_base, custom_base)
+        # SS should be 30% of custom base
+        expected_ss = (custom_base / 12) * AUTONOMO_FULL_RATE * 12
+        self.assertAlmostEqual(result.social_security_tax, expected_ss, places=2)
+
+    def test_autonomo_business_expenses(self):
+        """Test autónomo with business expenses."""
+        expenses = 2000
+        # Test without general deduction to match expected calculation
+        result = calculate_tax(60000, region='madrid', is_autonomo=True,
+                              business_expenses=expenses, months_as_autonomo=6,
+                              apply_general_deduction=False)
+        self.assertEqual(result.business_expenses, expenses)
+        # Taxable income should be: gross - expenses - SS
+        expected_taxable = 60000 - expenses - result.social_security_tax
+        self.assertAlmostEqual(result.taxable_income, expected_taxable, places=2)
+
+    def test_autonomo_general_deduction(self):
+        """Test autónomo with 5% general deduction."""
+        result = calculate_tax(60000, region='madrid', is_autonomo=True,
+                              business_expenses=2000, months_as_autonomo=6,
+                              apply_general_deduction=True)
+        # With general deduction: (gross - expenses) * 0.95 - SS
+        net_after_expenses = 60000 - 2000
+        general_deduction = net_after_expenses * AUTONOMO_GENERAL_EXPENSE_RATE
+        expected_taxable = net_after_expenses - general_deduction - result.social_security_tax
+        self.assertAlmostEqual(result.taxable_income, expected_taxable, places=2)
+
+    def test_autonomo_no_general_deduction(self):
+        """Test autónomo without 5% general deduction."""
+        result = calculate_tax(60000, region='madrid', is_autonomo=True,
+                              business_expenses=2000, months_as_autonomo=6,
+                              apply_general_deduction=False)
+        # Without general deduction: gross - expenses - SS
+        expected_taxable = 60000 - 2000 - result.social_security_tax
+        self.assertAlmostEqual(result.taxable_income, expected_taxable, places=2)
+
+    def test_autonomo_no_personal_allowance(self):
+        """Test that autónomos don't get personal allowance."""
+        result = calculate_tax(60000, region='madrid', is_autonomo=True, taxpayer_age=30)
+        self.assertTrue(result.is_autonomo)
+        # Personal allowance should be 0 for autónomos
+        self.assertEqual(result.personal_allowance, 0)
+        self.assertEqual(result.total_allowances, 0)
+
+    def test_autonomo_with_dependents(self):
+        """Test autónomo with dependents (only dependent allowances apply)."""
+        dependents = DependentInfo(children_3_plus=2)
+        result = calculate_tax(60000, region='madrid', is_autonomo=True, dependents=dependents)
+        self.assertTrue(result.is_autonomo)
+        # Personal allowance should be 0, but dependent allowances should apply
+        self.assertEqual(result.personal_allowance, 0)
+        self.assertGreater(result.dependent_allowances, 0)
+        self.assertEqual(result.total_allowances, result.dependent_allowances)
+
+    def test_autonomo_vs_employee_ss_difference(self):
+        """Test that autónomo SS is different from employee SS."""
+        income = 60000
+        result_autonomo = calculate_tax(income, region='madrid', is_autonomo=True, months_as_autonomo=6)
+        result_employee = calculate_tax(income, region='madrid', is_autonomo=False)
+        
+        # Autónomo SS should be different (reduced rate €80/month = €960/year)
+        # Employee SS should be 6.35% of income
+        self.assertNotEqual(result_autonomo.social_security_tax, result_employee.social_security_tax)
+        # Autónomo with reduced rate should have lower SS than employee
+        self.assertLess(result_autonomo.social_security_tax, result_employee.social_security_tax)
+
+    def test_autonomo_contribution_base_limits(self):
+        """Test that contribution base is clamped to min/max limits."""
+        # Low income - should use minimum base
+        result_low = calculate_tax(10000, region='madrid', is_autonomo=True)
+        expected_min_base = AUTONOMO_MIN_BASE_MONTHLY * 12
+        self.assertGreaterEqual(result_low.contribution_base, expected_min_base)
+        
+        # High income - should use maximum base
+        result_high = calculate_tax(200000, region='madrid', is_autonomo=True)
+        expected_max_base = AUTONOMO_MAX_BASE_MONTHLY * 12
+        self.assertLessEqual(result_high.contribution_base, expected_max_base)
+
+    def test_autonomo_result_attributes(self):
+        """Test that TaxResult has autónomo-specific attributes."""
+        result = calculate_tax(60000, region='madrid', is_autonomo=True, 
+                              months_as_autonomo=6, business_expenses=2000)
+        self.assertTrue(result.is_autonomo)
+        self.assertIsNotNone(result.contribution_base)
+        self.assertEqual(result.months_as_autonomo, 6)
+        self.assertEqual(result.business_expenses, 2000)
 
 
 if __name__ == '__main__':
