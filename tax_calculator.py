@@ -557,13 +557,10 @@ def calculate_tax(
     # Step 3: Calculate allowances
     dependent_allowances = calculate_dependent_allowances(dependents)
 
-    # For autónomos, personal allowance might not apply the same way
-    # The web tool seems to not apply personal allowance for autónomos
-    if is_autonomo:
-        # Don't apply personal allowance for autónomos (matches web tool behavior)
-        total_allowances = dependent_allowances
-    else:
-        total_allowances = personal_allowance + dependent_allowances
+    # Calculate total allowances (personal + dependent)
+    # Note: Autónomos are eligible for personal allowance in Spanish tax law
+    # The autonomoinfo.com website may not show it, but it should apply
+    total_allowances = personal_allowance + dependent_allowances
 
     # Step 4: Calculate taxable income for IRPF
     # Note: Under Beckham Law, personal allowance typically doesn't apply
@@ -594,9 +591,9 @@ def calculate_tax(
         gross_income=gross_income,
         social_security_tax=social_security_tax,
         income_after_ss=income_after_ss,
-        personal_allowance=personal_allowance if (not beckham_law and not is_autonomo) else 0,
+        personal_allowance=personal_allowance if not beckham_law else 0,
         dependent_allowances=dependent_allowances if not beckham_law else 0,
-        total_allowances=total_allowances if (not beckham_law and not is_autonomo) else (dependent_allowances if is_autonomo else 0),
+        total_allowances=total_allowances if not beckham_law else 0,
         taxable_income=taxable_income,
         state_irpf_tax=state_irpf_tax,
         regional_irpf_tax=regional_irpf_tax,

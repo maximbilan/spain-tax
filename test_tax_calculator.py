@@ -642,9 +642,9 @@ class TestAutonomoCalculation(unittest.TestCase):
         self.assertIsNotNone(result.contribution_base)
         # Should have social security tax
         self.assertGreater(result.social_security_tax, 0)
-        # Personal allowance should not apply for autónomos
-        self.assertEqual(result.personal_allowance, 0)
-        self.assertEqual(result.total_allowances, 0)
+        # Personal allowance should apply for autónomos (same as employees)
+        self.assertEqual(result.personal_allowance, PERSONAL_ALLOWANCE_UNDER_65)
+        self.assertEqual(result.total_allowances, PERSONAL_ALLOWANCE_UNDER_65)
 
     def test_autonomo_reduced_rate_months_1_12(self):
         """Test autónomo with reduced rate for first 12 months."""
@@ -704,8 +704,8 @@ class TestAutonomoCalculation(unittest.TestCase):
                               business_expenses=expenses, months_as_autonomo=6,
                               apply_general_deduction=False)
         self.assertEqual(result.business_expenses, expenses)
-        # Taxable income should be: gross - expenses - SS
-        expected_taxable = 60000 - expenses - result.social_security_tax
+        # Taxable income should be: gross - expenses - SS - personal allowance
+        expected_taxable = 60000 - expenses - result.social_security_tax - result.personal_allowance
         self.assertAlmostEqual(result.taxable_income, expected_taxable, places=2)
 
     def test_autonomo_general_deduction(self):
@@ -713,10 +713,10 @@ class TestAutonomoCalculation(unittest.TestCase):
         result = calculate_tax(60000, region='madrid', is_autonomo=True,
                               business_expenses=2000, months_as_autonomo=6,
                               apply_general_deduction=True)
-        # With general deduction: (gross - expenses) * 0.95 - SS
+        # With general deduction: (gross - expenses) * 0.95 - SS - personal allowance
         net_after_expenses = 60000 - 2000
         general_deduction = net_after_expenses * AUTONOMO_GENERAL_EXPENSE_RATE
-        expected_taxable = net_after_expenses - general_deduction - result.social_security_tax
+        expected_taxable = net_after_expenses - general_deduction - result.social_security_tax - result.personal_allowance
         self.assertAlmostEqual(result.taxable_income, expected_taxable, places=2)
 
     def test_autonomo_no_general_deduction(self):
@@ -724,27 +724,28 @@ class TestAutonomoCalculation(unittest.TestCase):
         result = calculate_tax(60000, region='madrid', is_autonomo=True,
                               business_expenses=2000, months_as_autonomo=6,
                               apply_general_deduction=False)
-        # Without general deduction: gross - expenses - SS
-        expected_taxable = 60000 - 2000 - result.social_security_tax
+        # Without general deduction: gross - expenses - SS - personal allowance
+        expected_taxable = 60000 - 2000 - result.social_security_tax - result.personal_allowance
         self.assertAlmostEqual(result.taxable_income, expected_taxable, places=2)
 
-    def test_autonomo_no_personal_allowance(self):
-        """Test that autónomos don't get personal allowance."""
+    def test_autonomo_personal_allowance(self):
+        """Test that autónomos get personal allowance (same as employees)."""
         result = calculate_tax(60000, region='madrid', is_autonomo=True, taxpayer_age=30)
         self.assertTrue(result.is_autonomo)
-        # Personal allowance should be 0 for autónomos
-        self.assertEqual(result.personal_allowance, 0)
-        self.assertEqual(result.total_allowances, 0)
+        # Personal allowance should apply for autónomos (same as employees)
+        self.assertEqual(result.personal_allowance, PERSONAL_ALLOWANCE_UNDER_65)
+        self.assertEqual(result.total_allowances, PERSONAL_ALLOWANCE_UNDER_65)
 
     def test_autonomo_with_dependents(self):
-        """Test autónomo with dependents (only dependent allowances apply)."""
+        """Test autónomo with dependents (both personal and dependent allowances apply)."""
         dependents = DependentInfo(children_3_plus=2)
         result = calculate_tax(60000, region='madrid', is_autonomo=True, dependents=dependents)
         self.assertTrue(result.is_autonomo)
-        # Personal allowance should be 0, but dependent allowances should apply
-        self.assertEqual(result.personal_allowance, 0)
+        # Both personal allowance and dependent allowances should apply
+        self.assertEqual(result.personal_allowance, PERSONAL_ALLOWANCE_UNDER_65)
         self.assertGreater(result.dependent_allowances, 0)
-        self.assertEqual(result.total_allowances, result.dependent_allowances)
+        expected_total = PERSONAL_ALLOWANCE_UNDER_65 + result.dependent_allowances
+        self.assertEqual(result.total_allowances, expected_total)
 
     def test_autonomo_vs_employee_ss_difference(self):
         """Test that autónomo SS is different from employee SS."""
