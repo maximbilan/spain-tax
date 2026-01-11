@@ -76,6 +76,11 @@ python3 tax_calculator.py 60000
 # Beckham Law (24% flat rate)
 ./run.sh 100000 --beckham-law
 
+# Autónomo (self-employed) examples:
+./run.sh 60000 --autonomo --region madrid
+./run.sh 60000 --autonomo --months-as-autonomo 6  # New autónomo (reduced rate)
+./run.sh 60000 --autonomo --contribution-base 40000  # Custom contribution base
+
 # Show IRPF rates by region
 python3 tax_calculator.py --show-regions
 ```
@@ -105,8 +110,22 @@ python3 tax_calculator.py --show-regions
   - 65-74: €6,700
   - 75+: €8,100
 
-- `--ss-rate RATE`: Social Security rate as decimal
+- `--ss-rate RATE`: Social Security rate as decimal (for employees only)
   - Default: 0.0635 (6.35%)
+
+- `--autonomo`: Calculate for autónomo (self-employed) instead of employee
+  - Uses contribution base system instead of percentage of income
+  - See "Autónomo Mode" section below for details
+
+- `--contribution-base AMOUNT`: Annual contribution base for autónomos
+  - If not provided, estimated as 75% of income (clamped to €12,000-€56,400 annually)
+  - Must be between €12,000 and €56,400 annually
+
+- `--months-as-autonomo N`: Number of months as autónomo (for reduced rates)
+  - 1-12 months: €80/month flat rate
+  - 13-24 months: €160/month flat rate
+  - 25+ months: Full rate (30% of contribution base)
+  - If not specified, uses full rate
 
 ### Dependent Options
 
@@ -213,9 +232,23 @@ python3 tax_calculator.py --show-regions
 
 ### Social Security
 
+#### Employee Mode (Default)
 - **Rate**: 6.35% of gross income (national, same across all regions)
 - **Includes**: Healthcare, unemployment benefits, pension contributions, professional training
 - **Coverage**: You and your dependents (spouse and children) are automatically covered
+
+#### Autónomo Mode (Self-Employed)
+- **System**: Based on contribution base (base de cotización), not percentage of income
+- **Contribution Base**: Choose between €1,000-€4,700/month (default: estimated as 75% of income)
+- **Full Rate**: 30% of contribution base (after 24 months)
+- **Reduced Rates for New Autónomos**:
+  - First 12 months: €80/month flat rate
+  - Months 13-24: €160/month flat rate
+  - After 24 months: Full rate (30% of contribution base)
+- **Includes**: Healthcare, unemployment benefits, pension contributions, professional training, cessation of activity
+- **Coverage**: You and your dependents (spouse and children) are automatically covered
+
+**Note**: The calculator defaults to employee mode. Use `--autonomo` flag to calculate for self-employed.
 
 ## Example Calculations
 

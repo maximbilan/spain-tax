@@ -128,6 +128,24 @@ ALLOWANCE_DISABILITY_DEPENDENCY = 12000  # Taxpayer requiring assistance
 # Typical rate is 6.35% of gross salary for employees
 SOCIAL_SECURITY_RATE = 0.0635  # 6.35%
 
+# Autónomo (self-employed) Social Security rates and bases (2024)
+# Contribution base limits (monthly)
+AUTONOMO_MIN_BASE_MONTHLY = 1000.0  # Minimum contribution base per month
+AUTONOMO_MAX_BASE_MONTHLY = 4700.0  # Maximum contribution base per month
+AUTONOMO_FULL_RATE = 0.30  # 30% of contribution base (includes common contingencies, training, cessation)
+
+# Reduced rates for new autónomos (monthly flat rates)
+AUTONOMO_REDUCED_RATE_MONTHS_1_12 = 80.0  # First 12 months: €80/month
+AUTONOMO_REDUCED_RATE_MONTHS_13_24 = 160.0  # Months 13-24: €160/month
+
+# Default contribution base estimation (as percentage of gross income)
+# Many autónomos choose a base around 70-80% of their income
+AUTONOMO_DEFAULT_BASE_PERCENTAGE = 0.75  # 75% of gross income
+
+# General expense deduction for autónomos (5% of net income after actual expenses)
+# This is a standard deduction that autónomos can claim without justification
+AUTONOMO_GENERAL_EXPENSE_RATE = 0.05  # 5% of net income
+
 # Beckham Law (Special Tax Regime for Foreign Workers)
 # Flat 24% tax rate on income up to €600,000
 # Income above €600,000 is taxed at normal progressive rates
@@ -203,10 +221,14 @@ class TaxResult:
     beckham_law: bool
     beckham_law_tax: float  # Tax on income up to threshold
     beckham_law_excess_tax: float  # Tax on income above threshold (if any)
-    taxpayer_age: int  # Taxpayer's age
+    taxpayer_age: Optional[int]  # Taxpayer's age
     dependents: DependentInfo
     state_breakdown: List[TaxBreakdown]
     regional_breakdown: List[TaxBreakdown]
+    is_autonomo: bool = False  # Whether calculation is for autónomo (self-employed)
+    contribution_base: Optional[float] = None  # Contribution base for autónomos (annual)
+    months_as_autonomo: Optional[int] = None  # Months as autónomo (for reduced rates)
+    business_expenses: float = 0.0  # Business expenses deducted for autónomos
 
 
 class Colors:
@@ -297,7 +319,7 @@ def _calculate_family_status_allowances(dependents: DependentInfo) -> float:
 
     if dependents.single_parent:
         total += ALLOWANCE_SINGLE_PARENT
-    
+
     return total
 
 
@@ -371,10 +393,64 @@ def get_personal_allowance_by_age(age: Optional[int] = None) -> float:
 
 
 def _calculate_social_security(gross_income: float, social_security_rate: float) -> Tuple[float, float]:
-    """Calculate social security tax and income after social security."""
+    """Calculate social security tax and income after social security (employee mode)."""
     social_security_tax = gross_income * social_security_rate
     income_after_ss = gross_income - social_security_tax
     return social_security_tax, income_after_ss
+
+
+def _estimate_autonomo_contribution_base(gross_income: float) -> float:
+    """Estimate autónomo contribution base from gross income."""
+    monthly_income = gross_income / MONTHS_PER_YEAR
+    estimated_monthly_base = monthly_income * AUTONOMO_DEFAULT_BASE_PERCENTAGE
+
+    # Clamp to minimum and maximum limits
+    estimated_monthly_base = max(AUTONOMO_MIN_BASE_MONTHLY, min(estimated_monthly_base, AUTONOMO_MAX_BASE_MONTHLY))
+
+    return estimated_monthly_base * MONTHS_PER_YEAR  # Return annual base
+
+
+def _calculate_autonomo_social_security(
+    gross_income: float,
+    contribution_base: Optional[float] = None,
+    months_as_autonomo: Optional[int] = None
+) -> Tuple[float, float, float]:
+    """
+    Calculate autónomo social security tax and income after social security.
+
+    Args:
+        gross_income: Annual gross income in euros
+        contribution_base: Annual contribution base (if None, estimated from income)
+        months_as_autonomo: Number of months as autónomo (for reduced rates)
+
+    Returns:
+        Tuple of (social_security_tax, income_after_ss, actual_contribution_base)
+    """
+    # Determine contribution base
+    if contribution_base is None:
+        contribution_base = _estimate_autonomo_contribution_base(gross_income)
+
+    monthly_base = contribution_base / MONTHS_PER_YEAR
+
+    # Apply reduced rates for new autónomos
+    if months_as_autonomo is not None:
+        if months_as_autonomo <= 12:
+            # First 12 months: flat €80/month
+            monthly_ss = AUTONOMO_REDUCED_RATE_MONTHS_1_12
+        elif months_as_autonomo <= 24:
+            # Months 13-24: flat €160/month
+            monthly_ss = AUTONOMO_REDUCED_RATE_MONTHS_13_24
+        else:
+            # After 24 months: full rate (30% of contribution base)
+            monthly_ss = monthly_base * AUTONOMO_FULL_RATE
+    else:
+        # No reduced rate specified, use full rate
+        monthly_ss = monthly_base * AUTONOMO_FULL_RATE
+
+    annual_ss = monthly_ss * MONTHS_PER_YEAR
+    income_after_ss = gross_income - annual_ss
+
+    return annual_ss, income_after_ss, contribution_base
 
 
 def _calculate_beckham_law_tax(taxable_income: float) -> Tuple[float, float, float, List[TaxBreakdown]]:
@@ -401,18 +477,34 @@ def _calculate_standard_irpf_tax(taxable_income: float, region: str) -> Tuple[fl
     return state_irpf_tax, regional_irpf_tax, total_irpf, state_breakdown, regional_breakdown
 
 
-def calculate_tax(gross_income: float, personal_allowance: Optional[float] = None, social_security_rate: float = SOCIAL_SECURITY_RATE, region: str = 'none', beckham_law: bool = False, dependents: Optional[DependentInfo] = None, taxpayer_age: Optional[int] = None) -> TaxResult:
+def calculate_tax(
+    gross_income: float,
+    personal_allowance: Optional[float] = None,
+    social_security_rate: float = SOCIAL_SECURITY_RATE,
+    region: str = 'none',
+    beckham_law: bool = False,
+    dependents: Optional[DependentInfo] = None,
+    taxpayer_age: Optional[int] = None,
+    is_autonomo: bool = False,
+    contribution_base: Optional[float] = None,
+    months_as_autonomo: Optional[int] = None,
+    business_expenses: float = 0.0,
+    apply_general_deduction: bool = True
+) -> TaxResult:
     """
     Calculate Spanish IRPF tax (state + regional) and social security contributions based on progressive brackets.
 
     Args:
         gross_income: Annual gross income in euros
         personal_allowance: Personal allowance amount (if None, calculated from age)
-        social_security_rate: Social security rate (default: 0.0635 = 6.35%)
+        social_security_rate: Social security rate (default: 0.0635 = 6.35% for employees)
         region: Spanish region (default: 'none'). Options: madrid, catalonia, andalusia, valencia, basque, galicia, castilla_leon, canary_islands, none
         beckham_law: Whether to apply Beckham Law (24% flat rate up to €600k) (default: False)
         dependents: DependentInfo object with information about dependents and family situation
         taxpayer_age: Taxpayer's age in years (affects personal allowance)
+        is_autonomo: Whether taxpayer is autónomo (self-employed) (default: False)
+        contribution_base: Annual contribution base for autónomos (if None, estimated from income)
+        months_as_autonomo: Number of months as autónomo (for reduced rates: 1-12=€80/mo, 13-24=€160/mo)
 
     Returns:
         TaxResult object with complete calculation breakdown
@@ -429,20 +521,58 @@ def calculate_tax(gross_income: float, personal_allowance: Optional[float] = Non
         personal_allowance = get_personal_allowance_by_age(taxpayer_age)
 
     # Step 1: Calculate Social Security
-    social_security_tax, income_after_ss = _calculate_social_security(gross_income, social_security_rate)
+    if is_autonomo:
+        social_security_tax, income_after_ss, actual_contribution_base = _calculate_autonomo_social_security(
+            gross_income, contribution_base, months_as_autonomo
+        )
+    else:
+        social_security_tax, income_after_ss = _calculate_social_security(gross_income, social_security_rate)
+        actual_contribution_base = None
 
-    # Step 2: Calculate allowances
+    # Step 2: For autónomos, deduct business expenses and optionally apply 5% general deduction
+    # Note: autonomoinfo.com shows taxable = gross - expenses - SS (without 5% deduction in display)
+    # but may use different IRPF calculation method
+    if is_autonomo:
+        if business_expenses > 0:
+            income_after_expenses = gross_income - business_expenses
+            if apply_general_deduction:
+                # Apply 5% general expense deduction (standard for autónomos)
+                general_deduction = income_after_expenses * AUTONOMO_GENERAL_EXPENSE_RATE
+                income_after_deductions = income_after_expenses - general_deduction
+            else:
+                # Match web tool display: taxable = gross - expenses - SS
+                income_after_deductions = income_after_expenses
+            income_for_taxable = income_after_deductions - social_security_tax
+        else:
+            if apply_general_deduction:
+                # Even without specific expenses, autónomos can claim 5% general deduction
+                general_deduction = gross_income * AUTONOMO_GENERAL_EXPENSE_RATE
+                income_after_deductions = gross_income - general_deduction
+            else:
+                income_after_deductions = gross_income
+            income_for_taxable = income_after_deductions - social_security_tax
+    else:
+        income_for_taxable = income_after_ss
+
+    # Step 3: Calculate allowances
     dependent_allowances = calculate_dependent_allowances(dependents)
-    total_allowances = personal_allowance + dependent_allowances
 
-    # Step 3: Calculate taxable income for IRPF
+    # For autónomos, personal allowance might not apply the same way
+    # The web tool seems to not apply personal allowance for autónomos
+    if is_autonomo:
+        # Don't apply personal allowance for autónomos (matches web tool behavior)
+        total_allowances = dependent_allowances
+    else:
+        total_allowances = personal_allowance + dependent_allowances
+
+    # Step 4: Calculate taxable income for IRPF
     # Note: Under Beckham Law, personal allowance typically doesn't apply
     if beckham_law:
-        taxable_income = income_after_ss  # No allowances under Beckham Law
+        taxable_income = income_for_taxable  # No allowances under Beckham Law
         total_allowances = 0
         dependent_allowances = 0
     else:
-        taxable_income = max(0, income_after_ss - total_allowances)
+        taxable_income = max(0, income_for_taxable - total_allowances)
 
     # Step 4: Calculate IRPF tax
     if beckham_law:
@@ -464,9 +594,9 @@ def calculate_tax(gross_income: float, personal_allowance: Optional[float] = Non
         gross_income=gross_income,
         social_security_tax=social_security_tax,
         income_after_ss=income_after_ss,
-        personal_allowance=personal_allowance if not beckham_law else 0,
+        personal_allowance=personal_allowance if (not beckham_law and not is_autonomo) else 0,
         dependent_allowances=dependent_allowances if not beckham_law else 0,
-        total_allowances=total_allowances if not beckham_law else 0,
+        total_allowances=total_allowances if (not beckham_law and not is_autonomo) else (dependent_allowances if is_autonomo else 0),
         taxable_income=taxable_income,
         state_irpf_tax=state_irpf_tax,
         regional_irpf_tax=regional_irpf_tax,
@@ -481,7 +611,11 @@ def calculate_tax(gross_income: float, personal_allowance: Optional[float] = Non
         taxpayer_age=taxpayer_age,
         dependents=dependents,
         state_breakdown=state_breakdown,
-        regional_breakdown=regional_breakdown
+        regional_breakdown=regional_breakdown,
+        is_autonomo=is_autonomo,
+        contribution_base=actual_contribution_base,
+        months_as_autonomo=months_as_autonomo,
+        business_expenses=business_expenses if is_autonomo else 0.0
     )
 
 
@@ -494,8 +628,10 @@ def _print_header(result: TaxResult):
     """Print the header section of the results."""
     region_display = _format_region_display(result.region)
     regime_display = "Beckham Law (24% flat rate)" if result.beckham_law else "Standard IRPF"
+    status_display = "Autónomo (Self-Employed)" if result.is_autonomo else "Employee"
     print(f"\n{Colors.BOLD}{Colors.HEADER}{'='*HEADER_WIDTH}{Colors.ENDC}")
     print(f"{Colors.BOLD}{Colors.HEADER}  Spanish Tax Calculation (IRPF + Social Security){Colors.ENDC}")
+    print(f"{Colors.BOLD}{Colors.HEADER}  Status: {status_display}{Colors.ENDC}")
     if result.beckham_law:
         print(f"{Colors.BOLD}{Colors.HEADER}  Tax Regime: {regime_display}{Colors.ENDC}")
     else:
@@ -518,6 +654,20 @@ def _print_summary(result: TaxResult):
     """Print the summary section of the results."""
     print(f"{Colors.BOLD}{Colors.OKCYAN}Summary:{Colors.ENDC}")
     print(f"  {Colors.OKBLUE}{'Gross Income:':<{SUMMARY_LABEL_WIDTH}}{Colors.ENDC} {Colors.BOLD}{format_currency_aligned(result.gross_income, SUMMARY_VALUE_WIDTH)}{Colors.ENDC}")
+
+    if result.is_autonomo and result.contribution_base is not None:
+        monthly_base = result.contribution_base / MONTHS_PER_YEAR
+        print(f"  {Colors.OKBLUE}{'Contribution Base (annual):':<{SUMMARY_LABEL_WIDTH}}{Colors.ENDC} {format_currency_aligned(result.contribution_base, SUMMARY_VALUE_WIDTH)}")
+        print(f"  {Colors.OKBLUE}{'Contribution Base (monthly):':<{SUMMARY_LABEL_WIDTH}}{Colors.ENDC} {format_currency_aligned(monthly_base, SUMMARY_VALUE_WIDTH)}")
+        if result.months_as_autonomo is not None:
+            if result.months_as_autonomo <= 12:
+                rate_info = f" (Reduced: €{AUTONOMO_REDUCED_RATE_MONTHS_1_12:.0f}/month)"
+            elif result.months_as_autonomo <= 24:
+                rate_info = f" (Reduced: €{AUTONOMO_REDUCED_RATE_MONTHS_13_24:.0f}/month)"
+            else:
+                rate_info = f" (Full rate: {AUTONOMO_FULL_RATE*100:.0f}% of base)"
+            print(f"  {Colors.OKBLUE}{'Months as Autónomo:':<{SUMMARY_LABEL_WIDTH}}{Colors.ENDC} {result.months_as_autonomo}{rate_info}")
+
     print(f"  {Colors.FAIL}{'Social Security:':<{SUMMARY_LABEL_WIDTH}}{Colors.ENDC} {Colors.FAIL}{format_currency_aligned(result.social_security_tax, SUMMARY_VALUE_WIDTH)}{Colors.ENDC}")
     print(f"  {Colors.OKBLUE}{'Income after SS:':<{SUMMARY_LABEL_WIDTH}}{Colors.ENDC} {format_currency_aligned(result.income_after_ss, SUMMARY_VALUE_WIDTH)}")
 
@@ -777,6 +927,40 @@ Available regions: madrid, catalonia, andalusia, valencia, basque, galicia, cast
         help='Apply Beckham Law (24%% flat rate on income up to €600,000). Income above €600k taxed at normal progressive rates. Regional tax does not apply.'
     )
 
+    # Autónomo (self-employed) options
+    parser.add_argument(
+        '--autonomo',
+        action='store_true',
+        help='Calculate for autónomo (self-employed) instead of employee. Uses contribution base system instead of percentage of income.'
+    )
+
+    parser.add_argument(
+        '--contribution-base',
+        type=float,
+        default=None,
+        help=f'Annual contribution base for autónomos (if not provided, estimated as {AUTONOMO_DEFAULT_BASE_PERCENTAGE*100:.0f}%% of income, clamped to €{AUTONOMO_MIN_BASE_MONTHLY*12:,.0f}-€{AUTONOMO_MAX_BASE_MONTHLY*12:,.0f})'
+    )
+
+    parser.add_argument(
+        '--months-as-autonomo',
+        type=int,
+        default=None,
+        help='Number of months as autónomo (for reduced rates: 1-12=€80/month, 13-24=€160/month, 25+=full rate). If not specified, uses full rate.'
+    )
+
+    parser.add_argument(
+        '--business-expenses',
+        type=float,
+        default=0.0,
+        help='Business expenses for autónomos (deducted from gross income before calculating taxable income). Default: 0'
+    )
+
+    parser.add_argument(
+        '--no-general-deduction',
+        action='store_true',
+        help='For autónomos: disable 5%% general expense deduction (matches autonomoinfo.com taxable income display). Default: applies 5%% deduction'
+    )
+
     # Dependent options
     parser.add_argument(
         '--children-under-3',
@@ -928,9 +1112,33 @@ Available regions: madrid, catalonia, andalusia, valencia, basque, galicia, cast
         taxpayer_disability_dependency=args.taxpayer_disability_dependency
     )
 
+    # Validate autónomo arguments
+    if args.autonomo:
+        if args.contribution_base is not None:
+            monthly_base = args.contribution_base / MONTHS_PER_YEAR
+            if monthly_base < AUTONOMO_MIN_BASE_MONTHLY or monthly_base > AUTONOMO_MAX_BASE_MONTHLY:
+                print(f"{Colors.FAIL}Error: Contribution base must be between €{AUTONOMO_MIN_BASE_MONTHLY*12:,.0f} and €{AUTONOMO_MAX_BASE_MONTHLY*12:,.0f} annually{Colors.ENDC}", file=sys.stderr)
+                sys.exit(1)
+        if args.months_as_autonomo is not None and args.months_as_autonomo < 0:
+            print(f"{Colors.FAIL}Error: Months as autónomo cannot be negative{Colors.ENDC}", file=sys.stderr)
+            sys.exit(1)
+
     # Calculate tax
     try:
-        result = calculate_tax(annual_income, args.allowance, args.ss_rate, args.region, args.beckham_law, dependents, args.age)
+        result = calculate_tax(
+            annual_income,
+            args.allowance,
+            args.ss_rate,
+            args.region,
+            args.beckham_law,
+            dependents,
+            args.age,
+            args.autonomo,
+            args.contribution_base,
+            args.months_as_autonomo,
+            args.business_expenses,
+            not args.no_general_deduction  # apply_general_deduction
+        )
         print_results(result, args.verbose)
     except Exception as e:
         print(f"{Colors.FAIL}Error calculating tax: {e}{Colors.ENDC}", file=sys.stderr)
