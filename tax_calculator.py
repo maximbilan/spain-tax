@@ -156,7 +156,7 @@ BECKHAM_LAW_RATE = 0.24  # 24%
 MONTHS_PER_YEAR = 12
 PERCENTAGE_MULTIPLIER = 100
 HEADER_WIDTH = 60
-SUMMARY_LABEL_WIDTH = 25
+SUMMARY_LABEL_WIDTH = 30  # Increased to accommodate "Contribution Base (monthly):" (29 chars)
 SUMMARY_VALUE_WIDTH = 20
 MONTHLY_LABEL_WIDTH = 20
 MONTHLY_VALUE_WIDTH = 20
@@ -660,13 +660,20 @@ def _print_summary(result: TaxResult):
         print(f"  {Colors.OKBLUE}{'Contribution Base (annual):':<{SUMMARY_LABEL_WIDTH}}{Colors.ENDC} {format_currency_aligned(result.contribution_base, SUMMARY_VALUE_WIDTH)}")
         print(f"  {Colors.OKBLUE}{'Contribution Base (monthly):':<{SUMMARY_LABEL_WIDTH}}{Colors.ENDC} {format_currency_aligned(monthly_base, SUMMARY_VALUE_WIDTH)}")
         if result.months_as_autonomo is not None:
+            months_value = f"{result.months_as_autonomo}"
+            print(f"  {Colors.OKBLUE}{'Months as Autónomo:':<{SUMMARY_LABEL_WIDTH}}{Colors.ENDC} {months_value:>{SUMMARY_VALUE_WIDTH}}")
             if result.months_as_autonomo <= 12:
-                rate_info = f" (Reduced: €{AUTONOMO_REDUCED_RATE_MONTHS_1_12:.0f}/month)"
+                rate_label = "Reduced rate:"
+                rate_value = f"€{AUTONOMO_REDUCED_RATE_MONTHS_1_12:.0f}/month"
             elif result.months_as_autonomo <= 24:
-                rate_info = f" (Reduced: €{AUTONOMO_REDUCED_RATE_MONTHS_13_24:.0f}/month)"
+                rate_label = "Reduced rate:"
+                rate_value = f"€{AUTONOMO_REDUCED_RATE_MONTHS_13_24:.0f}/month"
             else:
-                rate_info = f" (Full rate: {AUTONOMO_FULL_RATE*100:.0f}% of base)"
-            print(f"  {Colors.OKBLUE}{'Months as Autónomo:':<{SUMMARY_LABEL_WIDTH}}{Colors.ENDC} {result.months_as_autonomo}{rate_info}")
+                rate_label = "Full rate:"
+                rate_value = f"{AUTONOMO_FULL_RATE*100:.0f}% of contribution base"
+            # Use wider width for rate value to accommodate longer text
+            rate_width = max(SUMMARY_VALUE_WIDTH, len(rate_value) + 2)
+            print(f"  {Colors.OKBLUE}{rate_label:<{SUMMARY_LABEL_WIDTH}}{Colors.ENDC} {rate_value:>{rate_width}}")
 
     print(f"  {Colors.FAIL}{'Social Security:':<{SUMMARY_LABEL_WIDTH}}{Colors.ENDC} {Colors.FAIL}{format_currency_aligned(result.social_security_tax, SUMMARY_VALUE_WIDTH)}{Colors.ENDC}")
     print(f"  {Colors.OKBLUE}{'Income after SS:':<{SUMMARY_LABEL_WIDTH}}{Colors.ENDC} {format_currency_aligned(result.income_after_ss, SUMMARY_VALUE_WIDTH)}")
