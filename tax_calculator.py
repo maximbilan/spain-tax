@@ -125,11 +125,15 @@ ALLOWANCE_DISABILITY_MOBILITY = 3000  # Taxpayer with mobility disability
 ALLOWANCE_DISABILITY_DEPENDENCY = 12000  # Taxpayer requiring assistance
 
 # Social Security rate (employee contribution)
-# Typical rate is 6.35% of gross salary for employees
+# Rate for 2024: 6.35% of gross salary for employees
+# Source: Real Decreto-ley and Social Security regulations
+# Note: This rate may vary by year - verify for current tax year
 SOCIAL_SECURITY_RATE = 0.0635  # 6.35%
 
 # Autónomo (self-employed) Social Security rates and bases (2024)
 # Contribution base limits (monthly)
+# Source: Real Decreto and Social Security regulations
+# Note: These limits may change annually - verify for current tax year
 AUTONOMO_MIN_BASE_MONTHLY = 1000.0  # Minimum contribution base per month
 AUTONOMO_MAX_BASE_MONTHLY = 4700.0  # Maximum contribution base per month
 AUTONOMO_FULL_RATE = 0.30  # 30% of contribution base (includes common contingencies, training, cessation)
@@ -147,8 +151,10 @@ AUTONOMO_DEFAULT_BASE_PERCENTAGE = 0.75  # 75% of gross income
 AUTONOMO_GENERAL_EXPENSE_RATE = 0.05  # 5% of net income
 
 # Beckham Law (Special Tax Regime for Foreign Workers)
+# Ley 35/2006, Art. 93 - Special tax regime for foreign workers
 # Flat 24% tax rate on income up to €600,000
 # Income above €600,000 is taxed at normal progressive rates
+# Note: Verify threshold and rate are current for tax year
 BECKHAM_LAW_THRESHOLD = 600000  # euros
 BECKHAM_LAW_RATE = 0.24  # 24%
 
@@ -516,6 +522,10 @@ def calculate_tax(
     if dependents is None:
         dependents = DependentInfo()
 
+    # Validate business expenses for autónomos
+    if is_autonomo and business_expenses > gross_income:
+        raise ValueError(f"Business expenses (€{business_expenses:,.2f}) cannot exceed gross income (€{gross_income:,.2f})")
+
     # Determine personal allowance (use age-based if age provided, otherwise use provided value or default)
     if personal_allowance is None:
         personal_allowance = get_personal_allowance_by_age(taxpayer_age)
@@ -529,23 +539,23 @@ def calculate_tax(
         social_security_tax, income_after_ss = _calculate_social_security(gross_income, social_security_rate)
         actual_contribution_base = None
 
-    # Step 2: For autónomos, deduct business expenses and optionally apply 5% general deduction
+    # Step 2: For autónomos, deduct business expenses OR apply 5% general deduction
+    # IMPORTANT: According to Spanish tax law (Ley del IRPF, Art. 30), autónomos must choose ONE method:
+    # - Actual expenses method: Deduct actual documented business expenses
+    # - Simplified method: Deduct a percentage (typically 5%) based on activity type
+    # You CANNOT use both methods simultaneously.
     # Note: autonomoinfo.com shows taxable = gross - expenses - SS (without 5% deduction in display)
     # but may use different IRPF calculation method
     if is_autonomo:
         if business_expenses > 0:
-            income_after_expenses = gross_income - business_expenses
-            if apply_general_deduction:
-                # Apply 5% general expense deduction (standard for autónomos)
-                general_deduction = income_after_expenses * AUTONOMO_GENERAL_EXPENSE_RATE
-                income_after_deductions = income_after_expenses - general_deduction
-            else:
-                # Match web tool display: taxable = gross - expenses - SS
-                income_after_deductions = income_after_expenses
+            # If actual expenses are provided, use ONLY actual expenses (no 5% deduction)
+            # This follows Spanish tax law: you must choose one method, not both
+            income_after_deductions = gross_income - business_expenses
             income_for_taxable = income_after_deductions - social_security_tax
         else:
+            # No actual expenses provided: can use simplified 5% general deduction if enabled
             if apply_general_deduction:
-                # Even without specific expenses, autónomos can claim 5% general deduction
+                # Apply 5% general expense deduction (simplified method for autónomos)
                 general_deduction = gross_income * AUTONOMO_GENERAL_EXPENSE_RATE
                 income_after_deductions = gross_income - general_deduction
             else:
@@ -1125,6 +1135,10 @@ Available regions: madrid, catalonia, andalusia, valencia, basque, galicia, cast
                 sys.exit(1)
         if args.months_as_autonomo is not None and args.months_as_autonomo < 0:
             print(f"{Colors.FAIL}Error: Months as autónomo cannot be negative{Colors.ENDC}", file=sys.stderr)
+            sys.exit(1)
+        # Validate business expenses cannot exceed gross income
+        if args.business_expenses > annual_income:
+            print(f"{Colors.FAIL}Error: Business expenses (€{args.business_expenses:,.2f}) cannot exceed gross income (€{annual_income:,.2f}){Colors.ENDC}", file=sys.stderr)
             sys.exit(1)
 
     # Calculate tax

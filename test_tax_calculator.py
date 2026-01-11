@@ -709,14 +709,26 @@ class TestAutonomoCalculation(unittest.TestCase):
         self.assertAlmostEqual(result.taxable_income, expected_taxable, places=2)
 
     def test_autonomo_general_deduction(self):
-        """Test autónomo with 5% general deduction."""
+        """Test autónomo with 5% general deduction (no actual expenses)."""
+        # When no actual expenses are provided, can use 5% general deduction
+        result = calculate_tax(60000, region='madrid', is_autonomo=True,
+                              business_expenses=0, months_as_autonomo=6,
+                              apply_general_deduction=True)
+        # With general deduction: gross * 0.95 - SS - personal allowance
+        general_deduction = 60000 * AUTONOMO_GENERAL_EXPENSE_RATE
+        income_after_deduction = 60000 - general_deduction
+        expected_taxable = income_after_deduction - result.social_security_tax - result.personal_allowance
+        self.assertAlmostEqual(result.taxable_income, expected_taxable, places=2)
+
+    def test_autonomo_actual_expenses_only(self):
+        """Test autónomo with actual expenses only (no 5% deduction when expenses provided)."""
+        # When actual expenses are provided, 5% general deduction should NOT apply
+        # This is the correct behavior per Spanish tax law
         result = calculate_tax(60000, region='madrid', is_autonomo=True,
                               business_expenses=2000, months_as_autonomo=6,
-                              apply_general_deduction=True)
-        # With general deduction: (gross - expenses) * 0.95 - SS - personal allowance
-        net_after_expenses = 60000 - 2000
-        general_deduction = net_after_expenses * AUTONOMO_GENERAL_EXPENSE_RATE
-        expected_taxable = net_after_expenses - general_deduction - result.social_security_tax - result.personal_allowance
+                              apply_general_deduction=True)  # Flag ignored when expenses provided
+        # Should use ONLY actual expenses: gross - expenses - SS - personal allowance
+        expected_taxable = 60000 - 2000 - result.social_security_tax - result.personal_allowance
         self.assertAlmostEqual(result.taxable_income, expected_taxable, places=2)
 
     def test_autonomo_no_general_deduction(self):
