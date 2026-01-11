@@ -681,7 +681,7 @@ class TestAutonomoCalculation(unittest.TestCase):
         # Contribution base should be estimated as percentage of income
         expected_monthly_base = (income / 12) * AUTONOMO_DEFAULT_BASE_PERCENTAGE
         # Clamped to min/max
-        expected_monthly_base = max(AUTONOMO_MIN_BASE_MONTHLY, 
+        expected_monthly_base = max(AUTONOMO_MIN_BASE_MONTHLY,
                                    min(expected_monthly_base, AUTONOMO_MAX_BASE_MONTHLY))
         expected_annual_base = expected_monthly_base * 12
         self.assertAlmostEqual(result.contribution_base, expected_annual_base, places=2)
@@ -689,7 +689,7 @@ class TestAutonomoCalculation(unittest.TestCase):
     def test_autonomo_custom_contribution_base(self):
         """Test autónomo with custom contribution base."""
         custom_base = 40000  # annual
-        result = calculate_tax(60000, region='madrid', is_autonomo=True, 
+        result = calculate_tax(60000, region='madrid', is_autonomo=True,
                               contribution_base=custom_base, months_as_autonomo=25)
         self.assertEqual(result.contribution_base, custom_base)
         # SS should be 30% of custom base
@@ -751,7 +751,7 @@ class TestAutonomoCalculation(unittest.TestCase):
         income = 60000
         result_autonomo = calculate_tax(income, region='madrid', is_autonomo=True, months_as_autonomo=6)
         result_employee = calculate_tax(income, region='madrid', is_autonomo=False)
-        
+
         # Autónomo SS should be different (reduced rate €80/month = €960/year)
         # Employee SS should be 6.35% of income
         self.assertNotEqual(result_autonomo.social_security_tax, result_employee.social_security_tax)
@@ -764,7 +764,7 @@ class TestAutonomoCalculation(unittest.TestCase):
         result_low = calculate_tax(10000, region='madrid', is_autonomo=True)
         expected_min_base = AUTONOMO_MIN_BASE_MONTHLY * 12
         self.assertGreaterEqual(result_low.contribution_base, expected_min_base)
-        
+
         # High income - should use maximum base
         result_high = calculate_tax(200000, region='madrid', is_autonomo=True)
         expected_max_base = AUTONOMO_MAX_BASE_MONTHLY * 12
@@ -772,7 +772,7 @@ class TestAutonomoCalculation(unittest.TestCase):
 
     def test_autonomo_result_attributes(self):
         """Test that TaxResult has autónomo-specific attributes."""
-        result = calculate_tax(60000, region='madrid', is_autonomo=True, 
+        result = calculate_tax(60000, region='madrid', is_autonomo=True,
                               months_as_autonomo=6, business_expenses=2000)
         self.assertTrue(result.is_autonomo)
         self.assertIsNotNone(result.contribution_base)
